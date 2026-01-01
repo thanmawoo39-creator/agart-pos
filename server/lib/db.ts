@@ -7,12 +7,14 @@ import type {
   Staff,
   Attendance,
   CurrentShift,
+  InventoryLog,
   InsertProduct,
   InsertCustomer,
   InsertSale,
   InsertCreditLedger,
   InsertStaff,
   InsertAttendance,
+  InsertInventoryLog,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -26,6 +28,7 @@ const KEYS = {
   CREDIT_LEDGER: "creditLedger",
   STAFF: "staff",
   ATTENDANCE: "attendance",
+  INVENTORY_LOG: "inventoryLog",
   INITIALIZED: "initialized",
 };
 
@@ -328,6 +331,7 @@ export async function clearAllData(): Promise<void> {
   await db.delete(KEYS.CREDIT_LEDGER);
   await db.delete(KEYS.STAFF);
   await db.delete(KEYS.ATTENDANCE);
+  await db.delete(KEYS.INVENTORY_LOG);
   await db.delete(KEYS.INITIALIZED);
 }
 
@@ -340,7 +344,7 @@ export async function initializeMockData(): Promise<void> {
   const products = await getProducts();
   
   // If already initialized with valid data, skip
-  if (initialized === "v7" && products.length > 0) return;
+  if (initialized === "v8" && products.length > 0) return;
   
   // Clear any existing data and reinitialize
   await clearAllData();
@@ -353,6 +357,7 @@ export async function initializeMockData(): Promise<void> {
       barcode: "1234567890123",
       stock: 50,
       minStockLevel: 10,
+      unit: "pcs",
       category: "Beverages",
     },
     {
@@ -361,6 +366,7 @@ export async function initializeMockData(): Promise<void> {
       barcode: "1234567890124",
       stock: 5,
       minStockLevel: 10,
+      unit: "loaf",
       category: "Bakery",
     },
     {
@@ -369,6 +375,7 @@ export async function initializeMockData(): Promise<void> {
       barcode: "1234567890125",
       stock: 3,
       minStockLevel: 8,
+      unit: "gallon",
       category: "Dairy",
     },
     {
@@ -377,6 +384,7 @@ export async function initializeMockData(): Promise<void> {
       barcode: "1234567890126",
       stock: 25,
       minStockLevel: 5,
+      unit: "bottle",
       category: "Beverages",
     },
   ];
@@ -457,7 +465,61 @@ export async function initializeMockData(): Promise<void> {
     status: "active",
   });
 
-  await db.set(KEYS.INITIALIZED, "v7");
+  await db.set(KEYS.INITIALIZED, "v8");
+}
+
+// Inventory Log CRUD
+export async function getInventoryLogs(): Promise<InventoryLog[]> {
+  return getCollection<InventoryLog>(KEYS.INVENTORY_LOG);
+}
+
+export async function getInventoryLogsByProduct(productId: string): Promise<InventoryLog[]> {
+  const logs = await getInventoryLogs();
+  return logs.filter((log) => log.productId === productId);
+}
+
+export async function createInventoryLog(log: InsertInventoryLog): Promise<InventoryLog> {
+  const logs = await getInventoryLogs();
+  const newLog: InventoryLog = { ...log, id: randomUUID() };
+  logs.push(newLog);
+  await setCollection(KEYS.INVENTORY_LOG, logs);
+  return newLog;
+}
+
+// Stock adjustment with audit trail
+export async function adjustStock(
+  productId: string,
+  quantityChange: number,
+  type: "stock-in" | "sale" | "adjustment",
+  staffId?: string,
+  staffName?: string,
+  reason?: string
+): Promise<{ product: Product; log: InventoryLog } | undefined> {
+  const product = await getProduct(productId);
+  if (!product) return undefined;
+
+  const previousStock = product.stock;
+  const currentStock = Math.max(0, previousStock + quantityChange);
+
+  // Update product stock
+  const updatedProduct = await updateProduct(productId, { stock: currentStock });
+  if (!updatedProduct) return undefined;
+
+  // Create audit log
+  const log = await createInventoryLog({
+    productId,
+    productName: product.name,
+    type,
+    quantityChanged: quantityChange,
+    previousStock,
+    currentStock,
+    staffId,
+    staffName,
+    reason,
+    timestamp: new Date().toISOString(),
+  });
+
+  return { product: updatedProduct, log };
 }
 
 export default db;

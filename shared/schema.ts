@@ -8,11 +8,33 @@ export const productSchema = z.object({
   barcode: z.string().optional(),
   stock: z.number().int().min(0),
   minStockLevel: z.number().int().min(0),
+  unit: z.string().default("pcs"), // pcs, bag, box, kg, etc.
   category: z.string().optional(),
 });
 
 export type Product = z.infer<typeof productSchema>;
 export type InsertProduct = Omit<Product, "id">;
+
+// Inventory log schema for audit trail
+export const inventoryLogTypeSchema = z.enum(["stock-in", "sale", "adjustment"]);
+export type InventoryLogType = z.infer<typeof inventoryLogTypeSchema>;
+
+export const inventoryLogSchema = z.object({
+  id: z.string(),
+  productId: z.string(),
+  productName: z.string(),
+  type: inventoryLogTypeSchema,
+  quantityChanged: z.number().int(), // Positive for additions, negative for deductions
+  previousStock: z.number().int(),
+  currentStock: z.number().int(),
+  staffId: z.string().optional(),
+  staffName: z.string().optional(),
+  reason: z.string().optional(),
+  timestamp: z.string(),
+});
+
+export type InventoryLog = z.infer<typeof inventoryLogSchema>;
+export type InsertInventoryLog = Omit<InventoryLog, "id">;
 
 // Customer schema
 export const customerSchema = z.object({
