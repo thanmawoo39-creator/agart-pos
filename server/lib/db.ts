@@ -25,7 +25,9 @@ const KEYS = {
 // Helper to get all items from a collection
 async function getCollection<T>(key: string): Promise<T[]> {
   try {
-    const data = await db.get(key);
+    const result = await db.get(key);
+    if (!result.ok) return [];
+    const data = result.value;
     if (!data) return [];
     if (Array.isArray(data)) return data as T[];
     return [];
@@ -171,11 +173,11 @@ export async function clearAllData(): Promise<void> {
 
 // Initialize with mock data
 export async function initializeMockData(): Promise<void> {
-  const initialized = await db.get(KEYS.INITIALIZED);
+  const initializedResult = await db.get(KEYS.INITIALIZED);
+  const initialized = initializedResult.ok ? initializedResult.value : null;
   
   // Check if data exists and is valid
   const products = await getProducts();
-  const sales = await getSales();
   
   // If already initialized with valid data, skip
   if (initialized === "v3" && products.length > 0) return;
