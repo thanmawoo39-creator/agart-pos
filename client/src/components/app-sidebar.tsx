@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3 } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -14,8 +14,9 @@ import {
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Sales (POS)", url: "/sales", icon: ShoppingCart },
-  { title: "Products", url: "/products", icon: Package },
+  { title: "Inventory", url: "/inventory", icon: Boxes },
   { title: "Customers", url: "/customers", icon: Users },
+  { title: "Ledger", url: "/ledger", icon: Receipt },
   { title: "Reports", url: "/reports", icon: BarChart3 },
 ];
 
@@ -24,20 +25,20 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="p-6 border-b border-sidebar-border">
+      <SidebarHeader className="p-4 md:p-5 border-b border-sidebar-border">
         <Link href="/" data-testid="link-home">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary">
-              <ShoppingCart className="w-5 h-5 text-primary-foreground" />
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-indigo-600">
+              <ShoppingCart className="w-4.5 h-4.5 text-white" />
             </div>
             <div className="flex flex-col">
-              <span className="text-lg font-semibold text-sidebar-foreground">QuickPOS</span>
-              <span className="text-xs text-muted-foreground">Point of Sale</span>
+              <span className="text-base font-semibold text-sidebar-foreground">QuickPOS</span>
+              <span className="text-[10px] text-muted-foreground">Point of Sale</span>
             </div>
           </div>
         </Link>
       </SidebarHeader>
-      <SidebarContent className="px-3 py-4">
+      <SidebarContent className="px-2 py-3">
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -48,11 +49,11 @@ export function AppSidebar() {
                     <SidebarMenuButton
                       asChild
                       isActive={isActive}
-                      className="py-3 px-4"
+                      className="py-2.5 px-3"
                     >
-                      <Link href={item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
-                        <item.icon className="w-5 h-5" />
-                        <span className="font-medium">{item.title}</span>
+                      <Link href={item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-').replace(/[()]/g, '')}`}>
+                        <item.icon className="w-4 h-4" />
+                        <span className="text-sm font-medium">{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

@@ -5,8 +5,9 @@ export const productSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   price: z.number().positive(),
+  barcode: z.string().optional(),
   stock: z.number().int().min(0),
-  reorderLevel: z.number().int().min(0),
+  minStockLevel: z.number().int().min(0),
   category: z.string().optional(),
 });
 
@@ -19,7 +20,11 @@ export const customerSchema = z.object({
   name: z.string().min(1),
   phone: z.string().optional(),
   email: z.string().email().optional(),
-  creditBalance: z.number().default(0),
+  barcode: z.string().optional(),
+  creditLimit: z.number().min(0).default(0),
+  currentBalance: z.number().default(0),
+  loyaltyPoints: z.number().int().min(0).default(0),
+  riskTag: z.enum(["low", "high"]).default("low"),
 });
 
 export type Customer = z.infer<typeof customerSchema>;
@@ -40,11 +45,13 @@ export type SaleItem = z.infer<typeof saleItemSchema>;
 export const saleSchema = z.object({
   id: z.string(),
   items: z.array(saleItemSchema),
-  subtotal: z.number().positive(),
+  subtotal: z.number().min(0),
+  discount: z.number().min(0).default(0),
   tax: z.number().min(0),
   total: z.number().positive(),
   paymentMethod: z.enum(["cash", "card", "credit"]),
   customerId: z.string().optional(),
+  storeId: z.string().optional(),
   timestamp: z.string(),
 });
 
@@ -56,19 +63,35 @@ export const creditLedgerSchema = z.object({
   id: z.string(),
   customerId: z.string(),
   customerName: z.string(),
+  type: z.enum(["charge", "payment"]),
   amount: z.number(),
-  type: z.enum(["credit", "payment"]),
-  description: z.string(),
-  timestamp: z.string(),
   balanceAfter: z.number(),
+  description: z.string().optional(),
+  timestamp: z.string(),
 });
 
 export type CreditLedger = z.infer<typeof creditLedgerSchema>;
 export type InsertCreditLedger = Omit<CreditLedger, "id">;
 
+// Store schema
+export const storeSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  address: z.string().optional(),
+});
+
+export type Store = z.infer<typeof storeSchema>;
+
 // Dashboard summary types
 export interface DashboardSummary {
   totalSalesToday: number;
-  totalCreditBalance: number;
+  totalReceivables: number;
+  lowStockCount: number;
   lowStockItems: Product[];
+  aiInsight: string;
+}
+
+// Cart item type for Zustand store
+export interface CartItem extends SaleItem {
+  product: Product;
 }

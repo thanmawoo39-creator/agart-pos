@@ -12,6 +12,8 @@ import Sales from "@/pages/sales";
 import Products from "@/pages/products";
 import Customers from "@/pages/customers";
 import Reports from "@/pages/reports";
+import Inventory from "@/pages/inventory";
+import Ledger from "@/pages/ledger";
 
 function Router() {
   return (
@@ -19,7 +21,9 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/sales" component={Sales} />
       <Route path="/products" component={Products} />
+      <Route path="/inventory" component={Inventory} />
       <Route path="/customers" component={Customers} />
+      <Route path="/ledger" component={Ledger} />
       <Route path="/reports" component={Reports} />
       <Route component={NotFound} />
     </Switch>
@@ -28,7 +32,7 @@ function Router() {
 
 function App() {
   const style = {
-    "--sidebar-width": "16rem",
+    "--sidebar-width": "14rem",
     "--sidebar-width-icon": "3rem",
   };
 
@@ -39,11 +43,11 @@ function App() {
           <div className="flex h-screen w-full">
             <AppSidebar />
             <div className="flex flex-col flex-1 min-w-0">
-              <header className="flex items-center justify-between gap-4 p-4 border-b border-border bg-background sticky top-0 z-50">
+              <header className="flex items-center justify-between gap-4 px-3 py-2 md:px-4 md:py-3 border-b border-border bg-background sticky top-0 z-50">
                 <SidebarTrigger data-testid="button-sidebar-toggle" />
                 <ThemeToggle />
               </header>
-              <main className="flex-1 overflow-auto bg-muted/30">
+              <main className="flex-1 overflow-auto bg-slate-50 dark:bg-slate-900/50">
                 <Router />
               </main>
             </div>

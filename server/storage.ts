@@ -106,13 +106,25 @@ export class POSStorage implements IStorage {
   async getDashboardSummary(): Promise<DashboardSummary> {
     const todaySales = await db.getTodaySales();
     const totalSalesToday = todaySales.reduce((sum, sale) => sum + sale.total, 0);
-    const totalCreditBalance = await db.getTotalCreditBalance();
+    const totalReceivables = await db.getTotalReceivables();
     const lowStockItems = await db.getLowStockProducts();
+
+    // Simple AI insight based on data
+    let aiInsight = "Welcome! Everything looks stable today.";
+    if (lowStockItems.length > 2) {
+      aiInsight = `Alert: ${lowStockItems.length} items are running low. Consider restocking soon.`;
+    } else if (totalReceivables > 200) {
+      aiInsight = "Tip: You have significant outstanding receivables. Consider following up on payments.";
+    } else if (totalSalesToday > 50) {
+      aiInsight = "Great job! Sales are performing well today. Keep up the momentum!";
+    }
 
     return {
       totalSalesToday,
-      totalCreditBalance,
+      totalReceivables,
+      lowStockCount: lowStockItems.length,
       lowStockItems,
+      aiInsight,
     };
   }
 

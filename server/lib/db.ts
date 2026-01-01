@@ -152,14 +152,14 @@ export async function getTodaySales(): Promise<Sale[]> {
   return sales.filter((s) => s.timestamp.startsWith(today));
 }
 
-export async function getTotalCreditBalance(): Promise<number> {
+export async function getTotalReceivables(): Promise<number> {
   const customers = await getCustomers();
-  return customers.reduce((sum, c) => sum + (c.creditBalance || 0), 0);
+  return customers.reduce((sum, c) => sum + (c.currentBalance || 0), 0);
 }
 
 export async function getLowStockProducts(): Promise<Product[]> {
   const products = await getProducts();
-  return products.filter((p) => p.stock <= p.reorderLevel);
+  return products.filter((p) => p.stock <= p.minStockLevel);
 }
 
 // Clear all data (for reset)
@@ -180,7 +180,7 @@ export async function initializeMockData(): Promise<void> {
   const products = await getProducts();
   
   // If already initialized with valid data, skip
-  if (initialized === "v3" && products.length > 0) return;
+  if (initialized === "v5" && products.length > 0) return;
   
   // Clear any existing data and reinitialize
   await clearAllData();
@@ -190,23 +190,34 @@ export async function initializeMockData(): Promise<void> {
     {
       name: "Coffee (Large)",
       price: 4.99,
+      barcode: "1234567890123",
       stock: 50,
-      reorderLevel: 10,
+      minStockLevel: 10,
       category: "Beverages",
     },
     {
       name: "Bread (Whole Wheat)",
       price: 3.49,
+      barcode: "1234567890124",
       stock: 5,
-      reorderLevel: 10,
+      minStockLevel: 10,
       category: "Bakery",
     },
     {
       name: "Milk (1 Gallon)",
       price: 5.99,
+      barcode: "1234567890125",
       stock: 3,
-      reorderLevel: 8,
+      minStockLevel: 8,
       category: "Dairy",
+    },
+    {
+      name: "Orange Juice",
+      price: 6.49,
+      barcode: "1234567890126",
+      stock: 25,
+      minStockLevel: 5,
+      category: "Beverages",
     },
   ];
 
@@ -214,12 +225,27 @@ export async function initializeMockData(): Promise<void> {
     await createProduct(product);
   }
 
-  // Create sample customer
+  // Create sample customers
   await createCustomer({
     name: "John Smith",
     phone: "+1 555-0123",
     email: "john.smith@email.com",
-    creditBalance: 45.50,
+    barcode: "CUST001",
+    creditLimit: 500,
+    currentBalance: 45.50,
+    loyaltyPoints: 150,
+    riskTag: "low",
+  });
+
+  await createCustomer({
+    name: "Jane Doe",
+    phone: "+1 555-0456",
+    email: "jane.doe@email.com",
+    barcode: "CUST002",
+    creditLimit: 200,
+    currentBalance: 180.00,
+    loyaltyPoints: 50,
+    riskTag: "high",
   });
 
   // Create a sample sale for today
@@ -236,14 +262,16 @@ export async function initializeMockData(): Promise<void> {
         },
       ],
       subtotal: createdProducts[0].price * 2,
+      discount: 0,
       tax: createdProducts[0].price * 2 * 0.08,
       total: createdProducts[0].price * 2 * 1.08,
       paymentMethod: "cash",
+      storeId: "store-001",
       timestamp: new Date().toISOString(),
     });
   }
 
-  await db.set(KEYS.INITIALIZED, "v3");
+  await db.set(KEYS.INITIALIZED, "v5");
 }
 
 export default db;
