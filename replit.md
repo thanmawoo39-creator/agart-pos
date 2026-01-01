@@ -45,6 +45,33 @@ The current implementation uses Replit's key-value database with collection-base
 
 **Light/Dark Mode**: Theme toggle implemented with CSS variables and localStorage persistence.
 
+### Clean Code Architecture
+
+**POS Engine** (`server/lib/pos-engine.ts`): Domain-driven logic for sales processing with:
+- `findProductByBarcode()` / `findCustomerByBarcode()` - Barcode scanning
+- `processSale()` - Atomic stock updates and credit ledger entries
+- `addCustomerPayment()` - Credit payment processing
+- `POSError` class for domain-specific errors
+
+**AI Insights Engine** (`server/lib/ai-engine.ts`): Business intelligence module with:
+- `analyzeCustomerRisk(customerId)` - Risk analysis (High Risk if no payment 30+ days OR 90%+ credit utilization)
+- `getTopDebtors(limit)` - Top N customers by outstanding balance
+- `getStockWarnings()` - Predictive stock alerts based on sales velocity
+- `getDailySummary()` - Cash vs Credit vs Card breakdown
+- `getAIInsights()` - Aggregated insights for dashboard
+- `getAllCustomerRiskAnalysis()` - Full customer risk report
+
+### API Endpoints
+
+**AI Insights**:
+- `GET /api/ai/insights` - Dashboard AI insights (top debtors, stock warnings, daily summary)
+- `GET /api/ai/risk-analysis` - All customer risk analyses
+- `GET /api/ai/risk-analysis/:customerId` - Single customer risk analysis
+
+**Credit Management**:
+- `GET /api/customers/:id/ledger` - Customer's credit ledger entries
+- `POST /api/customers/:id/payment` - Add payment to customer account
+
 ## External Dependencies
 
 ### Core Services

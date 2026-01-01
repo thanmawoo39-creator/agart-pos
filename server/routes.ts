@@ -2,6 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { productSchema, customerSchema, saleSchema, creditLedgerSchema } from "@shared/schema";
+import { getAIInsights, getAllCustomerRiskAnalysis, analyzeCustomerRisk } from "./lib/ai-engine";
+import { findProductByBarcode, findCustomerByBarcode, getCustomerLedger, addCustomerPayment, processSale, POSError } from "./lib/pos-engine";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -202,7 +204,6 @@ export async function registerRoutes(
   // Barcode scanning - Products (uses POS Engine)
   app.get("/api/scan/product/:barcode", async (req, res) => {
     try {
-      const { findProductByBarcode } = await import("./lib/pos-engine");
       const product = await findProductByBarcode(req.params.barcode);
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
@@ -217,7 +218,6 @@ export async function registerRoutes(
   // Barcode scanning - Customers (uses POS Engine)
   app.get("/api/scan/customer/:barcode", async (req, res) => {
     try {
-      const { findCustomerByBarcode } = await import("./lib/pos-engine");
       const customer = await findCustomerByBarcode(req.params.barcode);
       if (!customer) {
         return res.status(404).json({ error: "Customer not found" });
@@ -232,7 +232,6 @@ export async function registerRoutes(
   // Get customer's credit ledger entries
   app.get("/api/customers/:id/ledger", async (req, res) => {
     try {
-      const { getCustomerLedger } = await import("./lib/pos-engine");
       const entries = await getCustomerLedger(req.params.id);
       res.json(entries);
     } catch (error) {
@@ -248,7 +247,6 @@ export async function registerRoutes(
       if (typeof amount !== "number" || amount <= 0) {
         return res.status(400).json({ error: "Invalid payment amount" });
       }
-      const { addCustomerPayment, POSError } = await import("./lib/pos-engine");
       try {
         await addCustomerPayment(req.params.id, amount, description);
         res.json({ success: true });
@@ -264,6 +262,40 @@ export async function registerRoutes(
     }
   });
 
+  // AI Insights endpoints
+  app.get("/api/ai/insights", async (req, res) => {
+    try {
+      const insights = await getAIInsights();
+      res.json(insights);
+    } catch (error) {
+      console.error("Error fetching AI insights:", error);
+      res.status(500).json({ error: "Failed to fetch AI insights" });
+    }
+  });
+
+  app.get("/api/ai/risk-analysis", async (req, res) => {
+    try {
+      const analyses = await getAllCustomerRiskAnalysis();
+      res.json(analyses);
+    } catch (error) {
+      console.error("Error fetching risk analysis:", error);
+      res.status(500).json({ error: "Failed to fetch risk analysis" });
+    }
+  });
+
+  app.get("/api/ai/risk-analysis/:customerId", async (req, res) => {
+    try {
+      const analysis = await analyzeCustomerRisk(req.params.customerId);
+      if (!analysis) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+      res.json(analysis);
+    } catch (error) {
+      console.error("Error analyzing customer risk:", error);
+      res.status(500).json({ error: "Failed to analyze customer risk" });
+    }
+  });
+
   // Complete sale with stock updates and credit handling (uses POS Engine)
   app.post("/api/sales/complete", async (req, res) => {
     try {
@@ -273,7 +305,6 @@ export async function registerRoutes(
       }
 
       const saleData = parsed.data;
-      const { processSale, POSError } = await import("./lib/pos-engine");
 
       try {
         const result = await processSale(saleData);

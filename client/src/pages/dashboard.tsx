@@ -1,12 +1,64 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DollarSign, CreditCard, AlertTriangle, Sparkles, Bot } from "lucide-react";
+import { 
+  DollarSign, 
+  CreditCard, 
+  AlertTriangle, 
+  Sparkles, 
+  Bot, 
+  Users, 
+  Package,
+  TrendingUp,
+  Banknote,
+  Smartphone
+} from "lucide-react";
 import type { DashboardSummary } from "@shared/schema";
+
+interface TopDebtor {
+  customerId: string;
+  customerName: string;
+  outstandingBalance: number;
+  creditLimit: number;
+  riskLevel: "low" | "high";
+  utilizationPercent: number;
+}
+
+interface StockWarning {
+  productId: string;
+  productName: string;
+  currentStock: number;
+  avgDailySales: number;
+  daysUntilStockout: number;
+  severity: "critical" | "warning" | "low";
+}
+
+interface DailySummary {
+  date: string;
+  totalSales: number;
+  cashSales: number;
+  cardSales: number;
+  creditSales: number;
+  transactionCount: number;
+  cashTransactions: number;
+  creditTransactions: number;
+}
+
+interface AIInsights {
+  topDebtors: TopDebtor[];
+  stockWarnings: StockWarning[];
+  dailySummary: DailySummary;
+  riskySummary: string;
+}
 
 export default function Dashboard() {
   const { data: summary, isLoading } = useQuery<DashboardSummary>({
     queryKey: ["/api/dashboard/summary"],
+  });
+
+  const { data: aiInsights, isLoading: insightsLoading } = useQuery<AIInsights>({
+    queryKey: ["/api/ai/insights"],
   });
 
   const formatCurrency = (amount: number) => {
@@ -108,17 +160,169 @@ export default function Dashboard() {
             </div>
           </CardHeader>
           <CardContent className="p-3 md:p-4 pt-0">
-            {isLoading ? (
+            {insightsLoading ? (
               <Skeleton className="h-12 w-full" />
             ) : (
               <p className="text-xs md:text-sm text-foreground leading-relaxed" data-testid="text-ai-insight">
-                {summary?.aiInsight ?? "Loading insights..."}
+                {aiInsights?.riskySummary ?? "Loading insights..."}
               </p>
             )}
           </CardContent>
         </Card>
       </div>
 
+      {/* AI Assistant Panel */}
+      <Card data-testid="card-ai-assistant" className="bg-gradient-to-r from-indigo-500/5 via-transparent to-emerald-500/5">
+        <CardHeader className="p-3 md:p-4 pb-2">
+          <CardTitle className="text-base md:text-lg font-medium flex items-center gap-2">
+            <Bot className="w-5 h-5 text-indigo-500" />
+            AI Assistant
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-3 md:p-4 pt-0">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Top 3 Debtors */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <Users className="w-4 h-4" />
+                Top 3 Debtors
+              </div>
+              {insightsLoading ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-12" />
+                  ))}
+                </div>
+              ) : aiInsights?.topDebtors && aiInsights.topDebtors.length > 0 ? (
+                <div className="space-y-2">
+                  {aiInsights.topDebtors.map((debtor, index) => (
+                    <div
+                      key={debtor.customerId}
+                      className="flex items-center justify-between gap-2 p-2 rounded-lg bg-muted/50"
+                      data-testid={`debtor-${debtor.customerId}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-muted-foreground">#{index + 1}</span>
+                          <span className="text-sm font-medium truncate">{debtor.customerName}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatCurrency(debtor.outstandingBalance)}
+                        </div>
+                      </div>
+                      <Badge
+                        variant={debtor.riskLevel === "high" ? "destructive" : "secondary"}
+                        className="text-[10px]"
+                      >
+                        {debtor.riskLevel === "high" ? "High Risk" : "Low Risk"}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground py-4 text-center">
+                  No outstanding debts
+                </p>
+              )}
+            </div>
+
+            {/* Stock Warnings */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <Package className="w-4 h-4" />
+                Stock Warnings
+              </div>
+              {insightsLoading ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-12" />
+                  ))}
+                </div>
+              ) : aiInsights?.stockWarnings && aiInsights.stockWarnings.length > 0 ? (
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {aiInsights.stockWarnings.slice(0, 5).map((warning) => (
+                    <div
+                      key={warning.productId}
+                      className="flex items-center justify-between gap-2 p-2 rounded-lg bg-muted/50"
+                      data-testid={`stock-warning-${warning.productId}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium truncate block">{warning.productName}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {warning.currentStock} left ({warning.daysUntilStockout === 999 ? "No sales" : `~${warning.daysUntilStockout} days`})
+                        </span>
+                      </div>
+                      <Badge
+                        variant={warning.severity === "critical" ? "destructive" : warning.severity === "warning" ? "secondary" : "outline"}
+                        className={`text-[10px] ${warning.severity === "warning" ? "bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30" : ""}`}
+                      >
+                        {warning.severity}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground py-4 text-center">
+                  All products well-stocked
+                </p>
+              )}
+            </div>
+
+            {/* Daily Summary */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <TrendingUp className="w-4 h-4" />
+                Daily Summary
+              </div>
+              {insightsLoading ? (
+                <Skeleton className="h-36" />
+              ) : aiInsights?.dailySummary ? (
+                <div className="space-y-3 p-3 rounded-lg bg-muted/50">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Banknote className="w-4 h-4 text-emerald-500" />
+                      <span className="text-xs text-muted-foreground">Cash</span>
+                    </div>
+                    <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(aiInsights.dailySummary.cashSales)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="w-4 h-4 text-indigo-500" />
+                      <span className="text-xs text-muted-foreground">Card/Mobile</span>
+                    </div>
+                    <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                      {formatCurrency(aiInsights.dailySummary.cardSales)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="w-4 h-4 text-amber-500" />
+                      <span className="text-xs text-muted-foreground">Credit</span>
+                    </div>
+                    <span className="text-sm font-bold text-amber-600 dark:text-amber-400">
+                      {formatCurrency(aiInsights.dailySummary.creditSales)}
+                    </span>
+                  </div>
+                  <div className="border-t border-border pt-2 mt-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium">Total Transactions</span>
+                      <span className="text-sm font-bold">{aiInsights.dailySummary.transactionCount}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground py-4 text-center">
+                  No sales today
+                </p>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Low Stock Items Table */}
       <Card data-testid="card-low-stock-table">
         <CardHeader className="p-3 md:p-4">
           <CardTitle className="text-base md:text-lg font-medium">Low Stock Items</CardTitle>
@@ -195,7 +399,7 @@ export default function Dashboard() {
             <div className="flex-1 min-w-0">
               <p className="text-[10px] md:text-xs font-medium opacity-80 mb-0.5 md:mb-1">AI Assistant</p>
               <p className="text-xs md:text-sm leading-snug">
-                Welcome! Everything looks stable today.
+                {insightsLoading ? "Analyzing..." : aiInsights?.riskySummary ?? "All systems healthy."}
               </p>
             </div>
           </div>
