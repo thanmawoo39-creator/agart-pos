@@ -12,10 +12,13 @@ import {
   Users, 
   Package,
   TrendingUp,
+  TrendingDown,
   Banknote,
-  Smartphone
+  Smartphone,
+  Wallet,
+  PiggyBank
 } from "lucide-react";
-import type { DashboardSummary } from "@shared/schema";
+import type { DashboardSummary, ProfitLossReport } from "@shared/schema";
 
 interface TopDebtor {
   customerId: string;
@@ -60,6 +63,10 @@ export default function Dashboard() {
 
   const { data: aiInsights, isLoading: insightsLoading } = useQuery<AIInsights>({
     queryKey: ["/api/ai/insights"],
+  });
+
+  const { data: pnlReport, isLoading: pnlLoading } = useQuery<ProfitLossReport>({
+    queryKey: ["/api/reports/pnl"],
   });
 
   const formatCurrency = (amount: number) => {
@@ -169,6 +176,104 @@ export default function Dashboard() {
                 {aiInsights?.riskySummary ?? "Loading insights..."}
               </p>
             )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Financial Summary Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        <Card data-testid="card-expenses">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 p-3 md:p-4 pb-2">
+            <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
+              Monthly Expenses
+            </CardTitle>
+            <div className="flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-lg bg-red-500/10">
+              <Wallet className="w-4 h-4 md:w-5 md:h-5 text-red-500" />
+            </div>
+          </CardHeader>
+          <CardContent className="p-3 md:p-4 pt-0">
+            {pnlLoading ? (
+              <Skeleton className="h-7 md:h-9 w-24 md:w-32" />
+            ) : (
+              <div className="text-xl md:text-3xl font-bold tabular-nums text-red-600 dark:text-red-400" data-testid="text-monthly-expenses">
+                {formatCurrency(pnlReport?.totalExpenses ?? 0)}
+              </div>
+            )}
+            <p className="text-[10px] md:text-xs text-muted-foreground mt-1">Operating costs</p>
+          </CardContent>
+        </Card>
+
+        <Card data-testid="card-gross-profit">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 p-3 md:p-4 pb-2">
+            <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
+              Gross Profit
+            </CardTitle>
+            <div className="flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-lg bg-blue-500/10">
+              <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-blue-500" />
+            </div>
+          </CardHeader>
+          <CardContent className="p-3 md:p-4 pt-0">
+            {pnlLoading ? (
+              <Skeleton className="h-7 md:h-9 w-24 md:w-32" />
+            ) : (
+              <div className={`text-xl md:text-3xl font-bold tabular-nums ${(pnlReport?.grossProfit ?? 0) >= 0 ? "text-blue-600 dark:text-blue-400" : "text-red-600"}`} data-testid="text-gross-profit">
+                {formatCurrency(pnlReport?.grossProfit ?? 0)}
+              </div>
+            )}
+            <p className="text-[10px] md:text-xs text-muted-foreground mt-1">Revenue - COGS</p>
+          </CardContent>
+        </Card>
+
+        <Card data-testid="card-net-profit" className={pnlReport?.netProfit && pnlReport.netProfit > 0 ? "bg-gradient-to-br from-emerald-500/5 to-transparent" : ""}>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 p-3 md:p-4 pb-2">
+            <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
+              Net Profit
+            </CardTitle>
+            <div className={`flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-lg ${(pnlReport?.netProfit ?? 0) >= 0 ? "bg-emerald-500/10" : "bg-red-500/10"}`}>
+              <PiggyBank className={`w-4 h-4 md:w-5 md:h-5 ${(pnlReport?.netProfit ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`} />
+            </div>
+          </CardHeader>
+          <CardContent className="p-3 md:p-4 pt-0">
+            {pnlLoading ? (
+              <Skeleton className="h-7 md:h-9 w-24 md:w-32" />
+            ) : (
+              <div className={`text-xl md:text-3xl font-bold tabular-nums ${(pnlReport?.netProfit ?? 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600"}`} data-testid="text-net-profit">
+                {formatCurrency(pnlReport?.netProfit ?? 0)}
+              </div>
+            )}
+            <p className="text-[10px] md:text-xs text-muted-foreground mt-1 flex items-center gap-1">
+              {pnlReport?.netProfitMargin !== undefined && (
+                <>
+                  {pnlReport.netProfitMargin >= 0 ? (
+                    <TrendingUp className="w-3 h-3 text-emerald-500" />
+                  ) : (
+                    <TrendingDown className="w-3 h-3 text-red-500" />
+                  )}
+                  <span>{pnlReport.netProfitMargin.toFixed(1)}% margin</span>
+                </>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card data-testid="card-revenue">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 p-3 md:p-4 pb-2">
+            <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
+              Monthly Revenue
+            </CardTitle>
+            <div className="flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-lg bg-purple-500/10">
+              <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-purple-500" />
+            </div>
+          </CardHeader>
+          <CardContent className="p-3 md:p-4 pt-0">
+            {pnlLoading ? (
+              <Skeleton className="h-7 md:h-9 w-24 md:w-32" />
+            ) : (
+              <div className="text-xl md:text-3xl font-bold tabular-nums text-purple-600 dark:text-purple-400" data-testid="text-monthly-revenue">
+                {formatCurrency(pnlReport?.revenue ?? 0)}
+              </div>
+            )}
+            <p className="text-[10px] md:text-xs text-muted-foreground mt-1">This month total</p>
           </CardContent>
         </Card>
       </div>

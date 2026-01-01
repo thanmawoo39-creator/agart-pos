@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { 
   BarChart3, 
   CreditCard, 
@@ -14,9 +15,13 @@ import {
   CheckCircle,
   Calendar,
   DollarSign,
-  Users
+  Users,
+  TrendingUp,
+  TrendingDown,
+  Wallet
 } from "lucide-react";
-import type { Sale } from "@shared/schema";
+import type { Sale, ProfitLossReport, ExpenseCategory } from "@shared/schema";
+import { format } from "date-fns";
 
 interface RiskAnalysis {
   customerId: string;
@@ -33,7 +38,20 @@ type SortField = "timestamp" | "total" | "paymentMethod";
 type SortDirection = "asc" | "desc";
 type RiskSortField = "customerName" | "currentBalance" | "creditUtilization" | "riskLevel";
 
+const categoryColors: Record<ExpenseCategory, string> = {
+  Rent: "text-blue-600 dark:text-blue-400",
+  Electricity: "text-yellow-600 dark:text-yellow-400",
+  Fuel: "text-orange-600 dark:text-orange-400",
+  Internet: "text-purple-600 dark:text-purple-400",
+  Taxes: "text-red-600 dark:text-red-400",
+  Other: "text-slate-600 dark:text-slate-400",
+};
+
 export default function Reports() {
+  const now = new Date();
+  const [pnlStartDate, setPnlStartDate] = useState(format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd"));
+  const [pnlEndDate, setPnlEndDate] = useState(format(now, "yyyy-MM-dd"));
+  
   const [salesSort, setSalesSort] = useState<{ field: SortField; direction: SortDirection }>({
     field: "timestamp",
     direction: "desc",
@@ -49,6 +67,10 @@ export default function Reports() {
 
   const { data: riskAnalysis, isLoading: riskLoading } = useQuery<RiskAnalysis[]>({
     queryKey: ["/api/ai/risk-analysis"],
+  });
+
+  const { data: pnlReport, isLoading: pnlLoading } = useQuery<ProfitLossReport>({
+    queryKey: ["/api/reports/pnl", pnlStartDate, pnlEndDate],
   });
 
   const formatCurrency = (amount: number) => {
@@ -155,6 +177,106 @@ export default function Reports() {
           Sales analytics and credit risk assessment
         </p>
       </div>
+
+      {/* P&L Report Section */}
+      <Card data-testid="card-pnl-report">
+        <CardHeader className="p-3 md:p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <CardTitle className="text-base md:text-lg font-medium flex items-center gap-2">
+              <Wallet className="w-5 h-5" />
+              Profit & Loss Report
+            </CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <Calendar className="w-4 h-4 text-muted-foreground" />
+                <Input
+                  type="date"
+                  value={pnlStartDate}
+                  onChange={(e) => setPnlStartDate(e.target.value)}
+                  className="w-32 h-8 text-xs"
+                  data-testid="input-pnl-start"
+                />
+                <span className="text-xs text-muted-foreground">to</span>
+                <Input
+                  type="date"
+                  value={pnlEndDate}
+                  onChange={(e) => setPnlEndDate(e.target.value)}
+                  className="w-32 h-8 text-xs"
+                  data-testid="input-pnl-end"
+                />
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-3 md:p-4 pt-0">
+          {pnlLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : pnlReport ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center py-2 border-b">
+                  <span className="text-sm text-muted-foreground">Revenue</span>
+                  <span className="text-sm font-bold text-emerald-600">{formatCurrency(pnlReport.revenue)}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b">
+                  <span className="text-sm text-muted-foreground">Cost of Goods Sold</span>
+                  <span className="text-sm font-medium text-red-500">-{formatCurrency(pnlReport.costOfGoodsSold)}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b bg-muted/30 px-2 rounded">
+                  <span className="text-sm font-medium">Gross Profit</span>
+                  <span className={`text-sm font-bold ${pnlReport.grossProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                    {formatCurrency(pnlReport.grossProfit)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b">
+                  <span className="text-sm text-muted-foreground">Total Expenses</span>
+                  <span className="text-sm font-medium text-red-500">-{formatCurrency(pnlReport.totalExpenses)}</span>
+                </div>
+                <div className="flex justify-between items-center py-3 bg-indigo-500/10 px-3 rounded-lg">
+                  <span className="text-base font-semibold">Net Profit</span>
+                  <div className="text-right">
+                    <span className={`text-lg font-bold ${pnlReport.netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`} data-testid="text-net-profit">
+                      {formatCurrency(pnlReport.netProfit)}
+                    </span>
+                    <div className="flex items-center gap-1 justify-end">
+                      {pnlReport.netProfitMargin >= 0 ? (
+                        <TrendingUp className="w-3 h-3 text-emerald-500" />
+                      ) : (
+                        <TrendingDown className="w-3 h-3 text-red-500" />
+                      )}
+                      <span className={`text-xs ${pnlReport.netProfitMargin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                        {pnlReport.netProfitMargin.toFixed(1)}% margin
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <h4 className="text-sm font-medium mb-3">Expenses by Category</h4>
+                <div className="space-y-2">
+                  {Object.entries(pnlReport.expensesByCategory)
+                    .filter(([, amount]) => amount > 0)
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([category, amount]) => (
+                      <div key={category} className="flex justify-between items-center py-1.5">
+                        <span className={`text-sm ${categoryColors[category as ExpenseCategory]}`}>{category}</span>
+                        <span className="text-sm font-medium">{formatCurrency(amount)}</span>
+                      </div>
+                    ))}
+                  {Object.values(pnlReport.expensesByCategory).every((v) => v === 0) && (
+                    <p className="text-xs text-muted-foreground text-center py-4">No expenses in this period</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-6">No data available for this period</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
