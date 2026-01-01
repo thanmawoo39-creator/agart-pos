@@ -1,15 +1,18 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt, UserCog } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarFooter,
 } from "@/components/ui/sidebar";
+import { useAuth } from "@/lib/auth-context";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -20,8 +23,13 @@ const navItems = [
   { title: "Reports", url: "/reports", icon: BarChart3 },
 ];
 
+const adminItems = [
+  { title: "Staff", url: "/staff", icon: UserCog },
+];
+
 export function AppSidebar() {
   const [location] = useLocation();
+  const { isOwner } = useAuth();
 
   return (
     <Sidebar>
@@ -62,6 +70,32 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {isOwner && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="px-3 text-xs text-muted-foreground">Admin</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {adminItems.map((item) => {
+                  const isActive = location === item.url;
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        className="py-2.5 px-3"
+                      >
+                        <Link href={item.url} data-testid={`link-${item.title.toLowerCase()}`}>
+                          <item.icon className="w-4 h-4" />
+                          <span className="text-sm font-medium">{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
     </Sidebar>
   );

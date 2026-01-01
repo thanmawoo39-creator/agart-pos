@@ -53,6 +53,7 @@ export const saleSchema = z.object({
   customerId: z.string().optional(),
   storeId: z.string().optional(),
   timestamp: z.string(),
+  createdBy: z.string().optional(),
 });
 
 export type Sale = z.infer<typeof saleSchema>;
@@ -68,10 +69,33 @@ export const creditLedgerSchema = z.object({
   balanceAfter: z.number(),
   description: z.string().optional(),
   timestamp: z.string(),
+  createdBy: z.string().optional(),
 });
 
 export type CreditLedger = z.infer<typeof creditLedgerSchema>;
 export type InsertCreditLedger = Omit<CreditLedger, "id">;
+
+// Staff schema with roles
+export const staffRoleSchema = z.enum(["owner", "manager", "cashier"]);
+export type StaffRole = z.infer<typeof staffRoleSchema>;
+
+export const staffSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  pin: z.string().length(4),
+  role: staffRoleSchema,
+  barcode: z.string().optional(),
+  active: z.boolean().default(true),
+});
+
+export type Staff = z.infer<typeof staffSchema>;
+export type InsertStaff = Omit<Staff, "id">;
+
+// Staff session for auth context
+export interface StaffSession {
+  staff: Staff;
+  loginTime: string;
+}
 
 // Store schema
 export const storeSchema = z.object({

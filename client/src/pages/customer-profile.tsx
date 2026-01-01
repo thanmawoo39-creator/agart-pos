@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/lib/auth-context";
 import {
   ArrowLeft,
   User,
@@ -39,6 +40,7 @@ import type { Customer, CreditLedger } from "@shared/schema";
 
 export default function CustomerProfile() {
   const { toast } = useToast();
+  const { currentStaff } = useAuth();
   const [, params] = useRoute("/customers/:id");
   const customerId = params?.id;
   const [paymentAmount, setPaymentAmount] = useState("");
@@ -56,7 +58,10 @@ export default function CustomerProfile() {
 
   const addPaymentMutation = useMutation({
     mutationFn: async (amount: number) => {
-      return apiRequest("POST", `/api/customers/${customerId}/payment`, { amount });
+      return apiRequest("POST", `/api/customers/${customerId}/payment`, { 
+        amount, 
+        createdBy: currentStaff?.name || "Unknown" 
+      });
     },
     onSuccess: () => {
       toast({

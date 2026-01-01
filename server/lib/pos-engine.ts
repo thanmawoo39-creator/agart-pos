@@ -157,6 +157,7 @@ export async function processSale(saleData: InsertSale): Promise<{
       balanceAfter: newBalance,
       description: `Sale - ${saleData.items.length} item(s)`,
       timestamp: saleData.timestamp,
+      createdBy: saleData.createdBy,
     };
     await db.createCreditLedgerEntry(ledgerEntry);
 
@@ -187,7 +188,8 @@ export async function getCustomerLedger(
 export async function addCustomerPayment(
   customerId: string,
   amount: number,
-  description?: string
+  description?: string,
+  createdBy?: string
 ): Promise<void> {
   const customer = await db.getCustomer(customerId);
   if (!customer) {
@@ -205,6 +207,7 @@ export async function addCustomerPayment(
     balanceAfter: newBalance,
     description: description || "Payment received",
     timestamp: new Date().toISOString(),
+    createdBy: createdBy,
   };
   await db.createCreditLedgerEntry(ledgerEntry);
 

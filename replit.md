@@ -72,6 +72,41 @@ The current implementation uses Replit's key-value database with collection-base
 - `GET /api/customers/:id/ledger` - Customer's credit ledger entries
 - `POST /api/customers/:id/payment` - Add payment to customer account
 
+**Staff Management**:
+- `GET /api/staff` - List all staff members (PINs not exposed)
+- `POST /api/staff` - Create new staff member
+- `PATCH /api/staff/:id` - Update staff member
+- `DELETE /api/staff/:id` - Delete staff member
+- `POST /api/auth/login` - Authenticate via PIN or barcode
+
+### Staff Management & Authentication
+
+**Staff Schema**: `server/lib/db.ts` and `shared/schema.ts`
+- id, name, pin (4-digit), role (owner/manager/cashier), barcode, active
+
+**Auth Context** (`client/src/lib/auth-context.tsx`):
+- Session management with localStorage persistence
+- Role checking: `isOwner`, `isManager`, `isCashier`
+- Hierarchical `canAccess('role')` function
+
+**Default Staff Credentials**:
+- Owner: PIN 1234 (STAFF001)
+- Manager: PIN 2345 (STAFF002)
+- Cashier: PIN 3456 (STAFF003)
+
+**Role-Based UI Permissions**:
+- Owner: Full access (Dashboard, Sales, Products, Customers, Ledger, Reports, Staff)
+- Manager: Dashboard, Sales, Products, Customers, Ledger, Reports (no Staff page)
+- Cashier: Sales, Products, Customers (limited ledger view)
+
+**Audit Trail**:
+- All sales and credit ledger entries include `createdBy` field
+- Tracks which staff member performed each transaction
+
+**Security Note (MVP)**:
+- Current implementation uses plain-text PINs and client-side role checks
+- For production: implement PIN hashing, server-side role enforcement, rate limiting
+
 ## External Dependencies
 
 ### Core Services

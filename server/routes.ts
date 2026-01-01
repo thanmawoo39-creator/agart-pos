@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { productSchema, customerSchema, saleSchema, creditLedgerSchema } from "@shared/schema";
+import { productSchema, customerSchema, saleSchema, creditLedgerSchema, staffSchema } from "@shared/schema";
 import { getAIInsights, getAllCustomerRiskAnalysis, analyzeCustomerRisk } from "./lib/ai-engine";
 import { findProductByBarcode, findCustomerByBarcode, getCustomerLedger, addCustomerPayment, processSale, POSError } from "./lib/pos-engine";
 
@@ -243,12 +243,12 @@ export async function registerRoutes(
   // Add payment to customer account
   app.post("/api/customers/:id/payment", async (req, res) => {
     try {
-      const { amount, description } = req.body;
+      const { amount, description, createdBy } = req.body;
       if (typeof amount !== "number" || amount <= 0) {
         return res.status(400).json({ error: "Invalid payment amount" });
       }
       try {
-        await addCustomerPayment(req.params.id, amount, description);
+        await addCustomerPayment(req.params.id, amount, description, createdBy);
         res.json({ success: true });
       } catch (error) {
         if (error instanceof POSError) {
@@ -318,6 +318,108 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error completing sale:", error);
       res.status(500).json({ error: "Failed to complete sale" });
+    }
+  });
+
+  // Staff Management
+  app.get("/api/staff", async (req, res) => {
+    try {
+      const staff = await storage.getStaff();
+      // Don't expose PINs in the list
+      const safeStaff = staff.map(({ pin, ...rest }) => rest);
+      res.json(safeStaff);
+    } catch (error) {
+      console.error("Error fetching staff:", error);
+      res.status(500).json({ error: "Failed to fetch staff" });
+    }
+  });
+
+  app.get("/api/staff/:id", async (req, res) => {
+    try {
+      const staffMember = await storage.getStaffMember(req.params.id);
+      if (!staffMember) {
+        return res.status(404).json({ error: "Staff member not found" });
+      }
+      // Don't expose PIN
+      const { pin, ...safeStaff } = staffMember;
+      res.json(safeStaff);
+    } catch (error) {
+      console.error("Error fetching staff member:", error);
+      res.status(500).json({ error: "Failed to fetch staff member" });
+    }
+  });
+
+  app.post("/api/staff", async (req, res) => {
+    try {
+      const parsed = staffSchema.omit({ id: true }).safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid staff data", details: parsed.error.errors });
+      }
+      const staffMember = await storage.createStaff(parsed.data);
+      const { pin, ...safeStaff } = staffMember;
+      res.status(201).json(safeStaff);
+    } catch (error) {
+      console.error("Error creating staff member:", error);
+      res.status(500).json({ error: "Failed to create staff member" });
+    }
+  });
+
+  app.patch("/api/staff/:id", async (req, res) => {
+    try {
+      const staffMember = await storage.updateStaff(req.params.id, req.body);
+      if (!staffMember) {
+        return res.status(404).json({ error: "Staff member not found" });
+      }
+      const { pin, ...safeStaff } = staffMember;
+      res.json(safeStaff);
+    } catch (error) {
+      console.error("Error updating staff member:", error);
+      res.status(500).json({ error: "Failed to update staff member" });
+    }
+  });
+
+  app.delete("/api/staff/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteStaff(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Staff member not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting staff member:", error);
+      res.status(500).json({ error: "Failed to delete staff member" });
+    }
+  });
+
+  // Staff Authentication
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { pin, barcode } = req.body;
+      
+      let staffMember = null;
+      if (pin) {
+        staffMember = await storage.getStaffByPin(pin);
+      } else if (barcode) {
+        staffMember = await storage.getStaffByBarcode(barcode);
+      }
+
+      if (!staffMember) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      if (!staffMember.active) {
+        return res.status(401).json({ error: "Staff account is inactive" });
+      }
+
+      // Return staff info without PIN
+      const { pin: _, ...safeStaff } = staffMember;
+      res.json({
+        staff: safeStaff,
+        loginTime: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error during login:", error);
+      res.status(500).json({ error: "Failed to authenticate" });
     }
   });
 

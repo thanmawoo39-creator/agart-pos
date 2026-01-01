@@ -95,6 +95,11 @@ export default function Ledger() {
                       <div className="text-[10px] text-muted-foreground">
                         Balance: {formatCurrency(entry.balanceAfter)}
                       </div>
+                      {entry.createdBy && (
+                        <div className="text-[10px] text-muted-foreground">
+                          By: {entry.createdBy}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

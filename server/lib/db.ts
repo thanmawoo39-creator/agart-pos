@@ -4,10 +4,12 @@ import type {
   Customer,
   Sale,
   CreditLedger,
+  Staff,
   InsertProduct,
   InsertCustomer,
   InsertSale,
   InsertCreditLedger,
+  InsertStaff,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -19,6 +21,7 @@ const KEYS = {
   CUSTOMERS: "customers",
   SALES: "sales",
   CREDIT_LEDGER: "creditLedger",
+  STAFF: "staff",
   INITIALIZED: "initialized",
 };
 
@@ -162,12 +165,61 @@ export async function getLowStockProducts(): Promise<Product[]> {
   return products.filter((p) => p.stock <= p.minStockLevel);
 }
 
+// Staff CRUD
+export async function getStaff(): Promise<Staff[]> {
+  return getCollection<Staff>(KEYS.STAFF);
+}
+
+export async function getStaffMember(id: string): Promise<Staff | undefined> {
+  const staff = await getStaff();
+  return staff.find((s) => s.id === id);
+}
+
+export async function getStaffByPin(pin: string): Promise<Staff | undefined> {
+  const staff = await getStaff();
+  return staff.find((s) => s.pin === pin && s.active);
+}
+
+export async function getStaffByBarcode(barcode: string): Promise<Staff | undefined> {
+  const staff = await getStaff();
+  return staff.find((s) => s.barcode === barcode && s.active);
+}
+
+export async function createStaff(staffMember: InsertStaff): Promise<Staff> {
+  const staff = await getStaff();
+  const newStaff: Staff = { ...staffMember, id: randomUUID() };
+  staff.push(newStaff);
+  await setCollection(KEYS.STAFF, staff);
+  return newStaff;
+}
+
+export async function updateStaff(
+  id: string,
+  updates: Partial<InsertStaff>
+): Promise<Staff | undefined> {
+  const staff = await getStaff();
+  const index = staff.findIndex((s) => s.id === id);
+  if (index === -1) return undefined;
+  staff[index] = { ...staff[index], ...updates };
+  await setCollection(KEYS.STAFF, staff);
+  return staff[index];
+}
+
+export async function deleteStaff(id: string): Promise<boolean> {
+  const staff = await getStaff();
+  const filtered = staff.filter((s) => s.id !== id);
+  if (filtered.length === staff.length) return false;
+  await setCollection(KEYS.STAFF, filtered);
+  return true;
+}
+
 // Clear all data (for reset)
 export async function clearAllData(): Promise<void> {
   await db.delete(KEYS.PRODUCTS);
   await db.delete(KEYS.CUSTOMERS);
   await db.delete(KEYS.SALES);
   await db.delete(KEYS.CREDIT_LEDGER);
+  await db.delete(KEYS.STAFF);
   await db.delete(KEYS.INITIALIZED);
 }
 
@@ -180,7 +232,7 @@ export async function initializeMockData(): Promise<void> {
   const products = await getProducts();
   
   // If already initialized with valid data, skip
-  if (initialized === "v5" && products.length > 0) return;
+  if (initialized === "v6" && products.length > 0) return;
   
   // Clear any existing data and reinitialize
   await clearAllData();
@@ -268,10 +320,36 @@ export async function initializeMockData(): Promise<void> {
       paymentMethod: "cash",
       storeId: "store-001",
       timestamp: new Date().toISOString(),
+      createdBy: "System",
     });
   }
 
-  await db.set(KEYS.INITIALIZED, "v5");
+  // Create sample staff members
+  await createStaff({
+    name: "Admin Owner",
+    pin: "1234",
+    role: "owner",
+    barcode: "STAFF001",
+    active: true,
+  });
+
+  await createStaff({
+    name: "Sarah Manager",
+    pin: "2345",
+    role: "manager",
+    barcode: "STAFF002",
+    active: true,
+  });
+
+  await createStaff({
+    name: "Mike Cashier",
+    pin: "3456",
+    role: "cashier",
+    barcode: "STAFF003",
+    active: true,
+  });
+
+  await db.set(KEYS.INITIALIZED, "v6");
 }
 
 export default db;

@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useStore } from "@/lib/store";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/lib/auth-context";
 import {
   ShoppingCart,
   Search,
@@ -29,6 +30,7 @@ import type { Product, Customer, InsertSale, SaleItem } from "@shared/schema";
 
 export default function Sales() {
   const { toast } = useToast();
+  const { currentStaff, isCashier } = useAuth();
   const [scanInput, setScanInput] = useState("");
   const [customerScanInput, setCustomerScanInput] = useState("");
   const [lastScannedProduct, setLastScannedProduct] = useState<string | null>(null);
@@ -242,6 +244,7 @@ export default function Sales() {
         customerId: linkedCustomer?.id,
         storeId: "store-001",
         timestamp: new Date().toISOString(),
+        createdBy: currentStaff?.name || "Unknown",
       };
 
       return apiRequest("POST", "/api/sales/complete", saleData);

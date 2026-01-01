@@ -3,10 +3,12 @@ import type {
   Customer,
   Sale,
   CreditLedger,
+  Staff,
   InsertProduct,
   InsertCustomer,
   InsertSale,
   InsertCreditLedger,
+  InsertStaff,
   DashboardSummary,
 } from "@shared/schema";
 import * as db from "./lib/db";
@@ -33,6 +35,15 @@ export interface IStorage {
   // Credit Ledger
   getCreditLedger(): Promise<CreditLedger[]>;
   createCreditLedgerEntry(entry: InsertCreditLedger): Promise<CreditLedger>;
+
+  // Staff
+  getStaff(): Promise<Staff[]>;
+  getStaffMember(id: string): Promise<Staff | undefined>;
+  getStaffByPin(pin: string): Promise<Staff | undefined>;
+  getStaffByBarcode(barcode: string): Promise<Staff | undefined>;
+  createStaff(staff: InsertStaff): Promise<Staff>;
+  updateStaff(id: string, updates: Partial<InsertStaff>): Promise<Staff | undefined>;
+  deleteStaff(id: string): Promise<boolean>;
 
   // Dashboard
   getDashboardSummary(): Promise<DashboardSummary>;
@@ -100,6 +111,35 @@ export class POSStorage implements IStorage {
 
   async createCreditLedgerEntry(entry: InsertCreditLedger): Promise<CreditLedger> {
     return db.createCreditLedgerEntry(entry);
+  }
+
+  // Staff
+  async getStaff(): Promise<Staff[]> {
+    return db.getStaff();
+  }
+
+  async getStaffMember(id: string): Promise<Staff | undefined> {
+    return db.getStaffMember(id);
+  }
+
+  async getStaffByPin(pin: string): Promise<Staff | undefined> {
+    return db.getStaffByPin(pin);
+  }
+
+  async getStaffByBarcode(barcode: string): Promise<Staff | undefined> {
+    return db.getStaffByBarcode(barcode);
+  }
+
+  async createStaff(staff: InsertStaff): Promise<Staff> {
+    return db.createStaff(staff);
+  }
+
+  async updateStaff(id: string, updates: Partial<InsertStaff>): Promise<Staff | undefined> {
+    return db.updateStaff(id, updates);
+  }
+
+  async deleteStaff(id: string): Promise<boolean> {
+    return db.deleteStaff(id);
   }
 
   // Dashboard
