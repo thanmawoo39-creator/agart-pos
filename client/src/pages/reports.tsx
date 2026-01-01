@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/lib/auth-context";
 import { 
   BarChart3, 
   CreditCard, 
@@ -18,7 +19,9 @@ import {
   Users,
   TrendingUp,
   TrendingDown,
-  Wallet
+  Wallet,
+  Sparkles,
+  Loader2
 } from "lucide-react";
 import type { Sale, ProfitLossReport, ExpenseCategory } from "@shared/schema";
 import { format } from "date-fns";
@@ -52,9 +55,11 @@ const getCategoryColor = (category: string): string => {
 };
 
 export default function Reports() {
+  const { isOwner } = useAuth();
   const now = new Date();
   const [pnlStartDate, setPnlStartDate] = useState(format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd"));
   const [pnlEndDate, setPnlEndDate] = useState(format(now, "yyyy-MM-dd"));
+  const [executiveSummary, setExecutiveSummary] = useState<string | null>(null);
   
   const [salesSort, setSalesSort] = useState<{ field: SortField; direction: SortDirection }>({
     field: "timestamp",
@@ -76,6 +81,20 @@ export default function Reports() {
   const pnlUrl = `/api/reports/pnl?startDate=${pnlStartDate}&endDate=${pnlEndDate}`;
   const { data: pnlReport, isLoading: pnlLoading } = useQuery<ProfitLossReport>({
     queryKey: [pnlUrl],
+  });
+
+  const summaryMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/gemini/pnl-summary?startDate=${pnlStartDate}&endDate=${pnlEndDate}`);
+      if (!response.ok) throw new Error("Failed to generate summary");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setExecutiveSummary(data.summary);
+    },
+    onError: () => {
+      setExecutiveSummary("Executive Summary ထုတ်ယူမှု မအောင်မြင်ပါ။");
+    },
   });
 
   const formatCurrency = (amount: number) => {
@@ -279,6 +298,42 @@ export default function Reports() {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground text-center py-6">No data available for this period</p>
+          )}
+
+          {/* Gemini Executive Summary */}
+          {isOwner && pnlReport && (
+            <div className="mt-6 pt-6 border-t">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <h4 className="text-sm font-medium flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-indigo-500" />
+                  Gemini Executive Summary
+                </h4>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => summaryMutation.mutate()}
+                  disabled={summaryMutation.isPending}
+                  data-testid="button-generate-summary"
+                >
+                  {summaryMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Generate Summary
+                    </>
+                  )}
+                </Button>
+              </div>
+              {executiveSummary && (
+                <div className="bg-gradient-to-br from-indigo-500/5 to-purple-500/5 rounded-lg p-4 border border-indigo-500/20" data-testid="gemini-executive-summary">
+                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{executiveSummary}</p>
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
