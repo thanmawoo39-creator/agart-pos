@@ -6,12 +6,14 @@ import type {
   Staff,
   Attendance,
   CurrentShift,
+  InventoryLog,
   InsertProduct,
   InsertCustomer,
   InsertSale,
   InsertCreditLedger,
   InsertStaff,
   InsertAttendance,
+  InsertInventoryLog,
   DashboardSummary,
 } from "@shared/schema";
 import * as db from "./lib/db";
@@ -58,6 +60,19 @@ export interface IStorage {
   clockIn(staffId: string, staffName: string): Promise<Attendance>;
   clockOut(attendanceId: string): Promise<Attendance | undefined>;
   getAttendanceReport(startDate: string, endDate: string): Promise<Attendance[]>;
+
+  // Inventory Management
+  getInventoryLogs(): Promise<InventoryLog[]>;
+  getInventoryLogsByProduct(productId: string): Promise<InventoryLog[]>;
+  createInventoryLog(log: InsertInventoryLog): Promise<InventoryLog>;
+  adjustStock(
+    productId: string,
+    quantityChange: number,
+    type: "stock-in" | "sale" | "adjustment",
+    staffId?: string,
+    staffName?: string,
+    reason?: string
+  ): Promise<{ product: Product; log: InventoryLog } | undefined>;
 
   // Dashboard
   getDashboardSummary(): Promise<DashboardSummary>;
@@ -191,6 +206,30 @@ export class POSStorage implements IStorage {
 
   async getAttendanceReport(startDate: string, endDate: string): Promise<Attendance[]> {
     return db.getAttendanceReport(startDate, endDate);
+  }
+
+  // Inventory Management
+  async getInventoryLogs(): Promise<InventoryLog[]> {
+    return db.getInventoryLogs();
+  }
+
+  async getInventoryLogsByProduct(productId: string): Promise<InventoryLog[]> {
+    return db.getInventoryLogsByProduct(productId);
+  }
+
+  async createInventoryLog(log: InsertInventoryLog): Promise<InventoryLog> {
+    return db.createInventoryLog(log);
+  }
+
+  async adjustStock(
+    productId: string,
+    quantityChange: number,
+    type: "stock-in" | "sale" | "adjustment",
+    staffId?: string,
+    staffName?: string,
+    reason?: string
+  ): Promise<{ product: Product; log: InventoryLog } | undefined> {
+    return db.adjustStock(productId, quantityChange, type, staffId, staffName, reason);
   }
 
   // Dashboard
