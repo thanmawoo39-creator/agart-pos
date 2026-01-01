@@ -199,5 +199,86 @@ export async function registerRoutes(
     }
   });
 
+  // Barcode scanning - Products
+  app.get("/api/scan/product/:barcode", async (req, res) => {
+    try {
+      const products = await storage.getProducts();
+      const product = products.find((p) => p.barcode === req.params.barcode);
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      res.json(product);
+    } catch (error) {
+      console.error("Error scanning product:", error);
+      res.status(500).json({ error: "Failed to scan product" });
+    }
+  });
+
+  // Barcode scanning - Customers
+  app.get("/api/scan/customer/:barcode", async (req, res) => {
+    try {
+      const customers = await storage.getCustomers();
+      const customer = customers.find((c) => c.barcode === req.params.barcode);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+      res.json(customer);
+    } catch (error) {
+      console.error("Error scanning customer:", error);
+      res.status(500).json({ error: "Failed to scan customer" });
+    }
+  });
+
+  // Complete sale with stock updates and credit handling
+  app.post("/api/sales/complete", async (req, res) => {
+    try {
+      const parsed = saleSchema.omit({ id: true }).safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid sale data", details: parsed.error.errors });
+      }
+
+      const saleData = parsed.data;
+
+      // Update product stock
+      for (const item of saleData.items) {
+        const product = await storage.getProduct(item.productId);
+        if (product) {
+          await storage.updateProduct(item.productId, {
+            stock: Math.max(0, product.stock - item.quantity),
+          });
+        }
+      }
+
+      // Handle credit payment
+      if (saleData.paymentMethod === "credit" && saleData.customerId) {
+        const customer = await storage.getCustomer(saleData.customerId);
+        if (customer) {
+          const newBalance = customer.currentBalance + saleData.total;
+          await storage.updateCustomer(saleData.customerId, {
+            currentBalance: newBalance,
+          });
+
+          // Create credit ledger entry
+          await storage.createCreditLedgerEntry({
+            customerId: customer.id,
+            customerName: customer.name,
+            type: "charge",
+            amount: saleData.total,
+            balanceAfter: newBalance,
+            description: `Sale - ${saleData.items.length} item(s)`,
+            timestamp: saleData.timestamp,
+          });
+        }
+      }
+
+      // Create the sale record
+      const sale = await storage.createSale(saleData);
+      res.status(201).json(sale);
+    } catch (error) {
+      console.error("Error completing sale:", error);
+      res.status(500).json({ error: "Failed to complete sale" });
+    }
+  });
+
   return httpServer;
 }

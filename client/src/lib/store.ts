@@ -1,15 +1,20 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { CartItem, Product, Store } from "@shared/schema";
+import type { CartItem, Product, Store, Customer } from "@shared/schema";
 
 interface CartState {
   items: CartItem[];
+  linkedCustomer: Customer | null;
+  discount: number;
   addItem: (product: Product, quantity?: number) => void;
   removeItem: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
+  setLinkedCustomer: (customer: Customer | null) => void;
+  setDiscount: (discount: number) => void;
   clearCart: () => void;
-  getTotal: () => number;
   getSubtotal: () => number;
+  getTax: () => number;
+  getTotal: () => number;
   getItemCount: () => number;
 }
 
@@ -18,13 +23,29 @@ interface StoreState {
   setCurrentStore: (store: Store | null) => void;
 }
 
-interface AppState extends CartState, StoreState {}
+interface AIAlert {
+  type: "warning" | "tip" | "success";
+  message: string;
+}
+
+interface AIState {
+  alerts: AIAlert[];
+  addAlert: (alert: AIAlert) => void;
+  clearAlerts: () => void;
+  setAlerts: (alerts: AIAlert[]) => void;
+}
+
+interface AppState extends CartState, StoreState, AIState {}
+
+const TAX_RATE = 0.08;
 
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       // Cart state
       items: [],
+      linkedCustomer: null,
+      discount: 0,
 
       addItem: (product: Product, quantity: number = 1) => {
         set((state) => {
@@ -84,16 +105,33 @@ export const useStore = create<AppState>()(
         }));
       },
 
-      clearCart: () => {
-        set({ items: [] });
+      setLinkedCustomer: (customer: Customer | null) => {
+        set({ linkedCustomer: customer });
       },
 
-      getTotal: () => {
-        return get().items.reduce((sum, item) => sum + item.total, 0);
+      setDiscount: (discount: number) => {
+        set({ discount: Math.max(0, discount) });
+      },
+
+      clearCart: () => {
+        set({ items: [], linkedCustomer: null, discount: 0, alerts: [] });
       },
 
       getSubtotal: () => {
         return get().items.reduce((sum, item) => sum + item.total, 0);
+      },
+
+      getTax: () => {
+        const subtotal = get().getSubtotal();
+        const discount = get().discount;
+        return (subtotal - discount) * TAX_RATE;
+      },
+
+      getTotal: () => {
+        const subtotal = get().getSubtotal();
+        const discount = get().discount;
+        const tax = get().getTax();
+        return subtotal - discount + tax;
       },
 
       getItemCount: () => {
@@ -106,11 +144,33 @@ export const useStore = create<AppState>()(
       setCurrentStore: (store: Store | null) => {
         set({ currentStore: store });
       },
+
+      // AI Alerts state
+      alerts: [],
+
+      addAlert: (alert: AIAlert) => {
+        set((state) => {
+          // Avoid duplicate alerts
+          const exists = state.alerts.some(a => a.message === alert.message);
+          if (exists) return state;
+          return { alerts: [...state.alerts, alert] };
+        });
+      },
+
+      clearAlerts: () => {
+        set({ alerts: [] });
+      },
+
+      setAlerts: (alerts: AIAlert[]) => {
+        set({ alerts });
+      },
     }),
     {
       name: "quickpos-storage",
       partialize: (state) => ({
         items: state.items,
+        linkedCustomer: state.linkedCustomer,
+        discount: state.discount,
         currentStore: state.currentStore,
       }),
     }
