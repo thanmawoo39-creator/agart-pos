@@ -168,3 +168,34 @@ export interface CurrentShift {
   clockInTime: string | null;
   attendanceId: string | null;
 }
+
+// Expense schema for business expense tracking
+export const expenseCategorySchema = z.enum(["Rent", "Electricity", "Fuel", "Internet", "Taxes", "Other"]);
+export type ExpenseCategory = z.infer<typeof expenseCategorySchema>;
+
+export const expenseSchema = z.object({
+  id: z.string(),
+  category: expenseCategorySchema,
+  amount: z.number().positive(),
+  date: z.string(), // YYYY-MM-DD format
+  staffId: z.string().optional(),
+  staffName: z.string().optional(),
+  note: z.string().optional(),
+  timestamp: z.string(), // ISO timestamp when created
+});
+
+export type Expense = z.infer<typeof expenseSchema>;
+export type InsertExpense = Omit<Expense, "id">;
+
+// P&L Report types
+export interface ProfitLossReport {
+  period: string;
+  revenue: number;
+  costOfGoodsSold: number;
+  grossProfit: number;
+  totalExpenses: number;
+  expensesByCategory: Record<ExpenseCategory, number>;
+  taxExpenses: number;
+  netProfit: number;
+  netProfitMargin: number;
+}
