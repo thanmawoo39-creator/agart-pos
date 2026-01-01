@@ -1,108 +1,428 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Package, AlertTriangle } from "lucide-react";
-import type { Product } from "@shared/schema";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth-context";
+import { Package, AlertTriangle, Plus, Minus, Search, History } from "lucide-react";
+import type { Product, InventoryLog } from "@shared/schema";
 
 export default function Inventory() {
-  const { data: products, isLoading } = useQuery<Product[]>({
+  const { toast } = useToast();
+  const { session, canAccess } = useAuth();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [adjustModalOpen, setAdjustModalOpen] = useState(false);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [adjustmentType, setAdjustmentType] = useState<"add" | "subtract">("add");
+  const [quantity, setQuantity] = useState("");
+  const [reason, setReason] = useState("");
+
+  const canAdjustStock = canAccess("manager");
+
+  const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
   });
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
+  const { data: productLogs = [], isLoading: logsLoading } = useQuery<InventoryLog[]>({
+    queryKey: ["/api/inventory/logs", selectedProduct?.id],
+    enabled: !!selectedProduct && historyModalOpen,
+  });
+
+  const adjustMutation = useMutation({
+    mutationFn: (data: { productId: string; quantityChange: number; type: string; reason: string; staffName?: string }) =>
+      apiRequest("POST", `/api/inventory/adjust/${data.productId}`, {
+        quantityChange: data.quantityChange,
+        type: data.type,
+        reason: data.reason,
+        staffName: data.staffName,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/logs"] });
+      toast({ title: "Stock adjusted successfully" });
+      closeAdjustModal();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to adjust stock",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const openAdjustModal = (product: Product, type: "add" | "subtract") => {
+    setSelectedProduct(product);
+    setAdjustmentType(type);
+    setQuantity("");
+    setReason("");
+    setAdjustModalOpen(true);
   };
+
+  const closeAdjustModal = () => {
+    setAdjustModalOpen(false);
+    setSelectedProduct(null);
+    setQuantity("");
+    setReason("");
+  };
+
+  const openHistoryModal = (product: Product) => {
+    setSelectedProduct(product);
+    setHistoryModalOpen(true);
+  };
+
+  const handleAdjustSubmit = () => {
+    if (!selectedProduct) return;
+    const qty = parseInt(quantity);
+    if (isNaN(qty) || qty <= 0) {
+      toast({ title: "Please enter a valid quantity", variant: "destructive" });
+      return;
+    }
+    if (!reason.trim()) {
+      toast({ title: "Reason is required", variant: "destructive" });
+      return;
+    }
+
+    const quantityChange = adjustmentType === "add" ? qty : -qty;
+    const type = adjustmentType === "add" ? "stock-in" : "adjustment";
+
+    adjustMutation.mutate({
+      productId: selectedProduct.id,
+      quantityChange,
+      type,
+      reason: reason.trim(),
+      staffName: session?.staff.name,
+    });
+  };
+
+  const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))) as string[];
+
+  const filteredProducts = products.filter((product) => {
+    const matchesSearch =
+      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.barcode?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = categoryFilter === "all" || product.category === categoryFilter;
+    return matchesSearch && matchesCategory;
+  });
+
+  const lowStockCount = products.filter((p) => p.stock <= p.minStockLevel).length;
+
+  if (isLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading inventory...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-semibold text-foreground" data-testid="text-page-title">
-            Inventory
+            Inventory Management
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground">
-            Manage your product stock
+            Track stock levels and adjustments
           </p>
         </div>
+        {lowStockCount > 0 && (
+          <Badge variant="destructive" className="flex items-center gap-1">
+            <AlertTriangle className="w-3 h-3" />
+            {lowStockCount} Low Stock
+          </Badge>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-4">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by name or barcode..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9"
+            data-testid="input-search"
+          />
+        </div>
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <SelectTrigger className="w-[180px]" data-testid="select-category">
+            <SelectValue placeholder="All Categories" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {categories.map((cat) => (
+              <SelectItem key={cat} value={cat!}>
+                {cat}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <Card>
         <CardHeader className="p-3 md:p-4">
           <CardTitle className="text-base md:text-lg font-medium flex items-center gap-2">
             <Package className="w-5 h-5 text-indigo-500" />
-            Product Inventory
+            Product Inventory ({filteredProducts.length} items)
           </CardTitle>
         </CardHeader>
         <CardContent className="p-3 md:p-4 pt-0">
-          {isLoading ? (
-            <div className="space-y-2 md:space-y-3">
-              {[1, 2, 3, 4].map((i) => (
-                <Skeleton key={i} className="h-16 w-full" />
-              ))}
-            </div>
-          ) : products && products.length > 0 ? (
-            <div className="space-y-2 md:space-y-3">
-              {products.map((product) => {
-                const isLowStock = product.stock <= product.minStockLevel;
-                return (
-                  <div
-                    key={product.id}
-                    className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border"
-                    data-testid={`card-product-${product.id}`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-medium text-foreground truncate">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead className="hidden md:table-cell">Category</TableHead>
+                  <TableHead className="hidden lg:table-cell">Barcode</TableHead>
+                  <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-center">Stock</TableHead>
+                  <TableHead className="text-center hidden sm:table-cell">Min</TableHead>
+                  <TableHead className="hidden sm:table-cell">Unit</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  {canAdjustStock && <TableHead className="text-center">Actions</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredProducts.map((product) => {
+                  const isLowStock = product.stock <= product.minStockLevel;
+                  return (
+                    <TableRow key={product.id} data-testid={`row-product-${product.id}`}>
+                      <TableCell className="font-medium">
+                        <span className="block truncate max-w-[150px] md:max-w-none">
                           {product.name}
-                        </h3>
-                        {product.category && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            {product.category}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground hidden md:table-cell">
+                        {product.category || "-"}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground hidden lg:table-cell">
+                        {product.barcode || "-"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        ${product.price.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className={isLowStock ? "text-destructive font-bold" : "font-medium"}>
+                          {product.stock}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center text-muted-foreground hidden sm:table-cell">
+                        {product.minStockLevel}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground hidden sm:table-cell">
+                        {product.unit || "pcs"}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {isLowStock ? (
+                          <Badge variant="destructive" className="text-xs">
+                            Low
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-xs">
+                            OK
                           </Badge>
                         )}
-                        {isLowStock && (
-                          <Badge variant="destructive" className="text-[10px] flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            Low Stock
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                        <span>Price: {formatCurrency(product.price)}</span>
-                        {product.barcode && <span>SKU: {product.barcode}</span>}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`text-lg font-bold tabular-nums ${isLowStock ? 'text-amber-600' : 'text-foreground'}`}>
-                        {product.stock}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        Min: {product.minStockLevel}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="flex items-center justify-center w-16 h-16 rounded-full bg-muted mb-4">
-                <Package className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <h3 className="text-lg font-medium text-foreground mb-2">
-                No Products Yet
-              </h3>
-              <p className="text-sm text-muted-foreground max-w-md">
-                Add products to start tracking your inventory.
-              </p>
-            </div>
-          )}
+                      </TableCell>
+                      {canAdjustStock && (
+                        <TableCell>
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => openAdjustModal(product, "add")}
+                              data-testid={`button-add-stock-${product.id}`}
+                            >
+                              <Plus className="w-4 h-4 text-emerald-600" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => openAdjustModal(product, "subtract")}
+                              data-testid={`button-subtract-stock-${product.id}`}
+                            >
+                              <Minus className="w-4 h-4 text-destructive" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => openHistoryModal(product)}
+                              data-testid={`button-history-${product.id}`}
+                            >
+                              <History className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
+                {filteredProducts.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={canAdjustStock ? 9 : 8} className="text-center py-8 text-muted-foreground">
+                      No products found
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
+
+      <Dialog open={adjustModalOpen} onOpenChange={setAdjustModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {adjustmentType === "add" ? "Add Stock" : "Subtract Stock"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedProduct?.name} - Current stock: {selectedProduct?.stock} {selectedProduct?.unit || "pcs"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="quantity">Quantity</Label>
+              <Input
+                id="quantity"
+                type="number"
+                min="1"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="Enter quantity"
+                data-testid="input-quantity"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reason">
+                Reason <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Enter reason for adjustment (required)"
+                data-testid="input-reason"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAdjustModal}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAdjustSubmit}
+              disabled={adjustMutation.isPending}
+              data-testid="button-submit-adjustment"
+            >
+              {adjustMutation.isPending ? "Processing..." : "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyModalOpen} onOpenChange={setHistoryModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Stock History</DialogTitle>
+            <DialogDescription>
+              {selectedProduct?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-80 overflow-y-auto">
+            {logsLoading ? (
+              <div className="py-8 text-center text-muted-foreground">Loading...</div>
+            ) : productLogs.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground">No history available</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Change</TableHead>
+                    <TableHead className="text-right">After</TableHead>
+                    <TableHead className="hidden md:table-cell">Reason</TableHead>
+                    <TableHead className="hidden md:table-cell">By</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {productLogs.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="text-sm">
+                        {new Date(log.timestamp).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            log.type === "sale"
+                              ? "secondary"
+                              : log.type === "stock-in"
+                              ? "default"
+                              : "outline"
+                          }
+                          className="text-xs"
+                        >
+                          {log.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span
+                          className={
+                            log.quantityChanged > 0
+                              ? "text-emerald-600 font-medium"
+                              : "text-destructive font-medium"
+                          }
+                        >
+                          {log.quantityChanged > 0 ? "+" : ""}
+                          {log.quantityChanged}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-medium">{log.currentStock}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate hidden md:table-cell">
+                        {log.reason || "-"}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground hidden md:table-cell">
+                        {log.staffName || "-"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

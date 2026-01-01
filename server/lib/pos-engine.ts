@@ -135,12 +135,18 @@ export async function processSale(saleData: InsertSale): Promise<{
     validateCreditSale(customer, saleData.total);
   }
 
-  // Step 3: Deduct stock for all items (atomic operation)
+  // Step 3: Deduct stock for all items and create inventory logs (atomic operation)
   for (const item of saleData.items) {
     const product = productMap.get(item.productId)!;
-    await db.updateProduct(item.productId, {
-      stock: Math.max(0, product.stock - item.quantity),
-    });
+    // Use adjustStock for audit trail
+    await db.adjustStock(
+      item.productId,
+      -item.quantity, // Negative for deduction
+      "sale",
+      undefined, // staffId from createdBy could be passed
+      saleData.createdBy,
+      `Sale: ${item.quantity} x ${product.name}`
+    );
   }
 
   // Step 4: If credit sale, create ledger entry FIRST (Ledger is Truth)
