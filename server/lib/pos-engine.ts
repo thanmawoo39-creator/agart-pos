@@ -139,12 +139,13 @@ export async function processSale(saleData: InsertSale): Promise<{
   for (const item of saleData.items) {
     const product = productMap.get(item.productId)!;
     // Use adjustStock for audit trail
+    // Note: staffId is not available in current sale schema, only staffName via createdBy
     await db.adjustStock(
       item.productId,
       -item.quantity, // Negative for deduction
       "sale",
-      undefined, // staffId from createdBy could be passed
-      saleData.createdBy,
+      undefined, // staffId - not captured in current sale schema
+      saleData.createdBy, // staffName from shift
       `Sale: ${item.quantity} x ${product.name}`
     );
   }

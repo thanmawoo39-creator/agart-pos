@@ -54,7 +54,7 @@ export default function Inventory() {
   });
 
   const { data: productLogs = [], isLoading: logsLoading } = useQuery<InventoryLog[]>({
-    queryKey: ["/api/inventory/logs", selectedProduct?.id],
+    queryKey: [`/api/inventory/logs/${selectedProduct?.id}`],
     enabled: !!selectedProduct && historyModalOpen,
   });
 
@@ -68,7 +68,9 @@ export default function Inventory() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/logs"] });
+      if (selectedProduct) {
+        queryClient.invalidateQueries({ queryKey: [`/api/inventory/logs/${selectedProduct.id}`] });
+      }
       toast({ title: "Stock adjusted successfully" });
       closeAdjustModal();
     },
