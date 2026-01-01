@@ -199,11 +199,11 @@ export async function registerRoutes(
     }
   });
 
-  // Barcode scanning - Products
+  // Barcode scanning - Products (uses POS Engine)
   app.get("/api/scan/product/:barcode", async (req, res) => {
     try {
-      const products = await storage.getProducts();
-      const product = products.find((p) => p.barcode === req.params.barcode);
+      const { findProductByBarcode } = await import("./lib/pos-engine");
+      const product = await findProductByBarcode(req.params.barcode);
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
@@ -214,11 +214,11 @@ export async function registerRoutes(
     }
   });
 
-  // Barcode scanning - Customers
+  // Barcode scanning - Customers (uses POS Engine)
   app.get("/api/scan/customer/:barcode", async (req, res) => {
     try {
-      const customers = await storage.getCustomers();
-      const customer = customers.find((c) => c.barcode === req.params.barcode);
+      const { findCustomerByBarcode } = await import("./lib/pos-engine");
+      const customer = await findCustomerByBarcode(req.params.barcode);
       if (!customer) {
         return res.status(404).json({ error: "Customer not found" });
       }
@@ -229,7 +229,42 @@ export async function registerRoutes(
     }
   });
 
-  // Complete sale with stock updates and credit handling
+  // Get customer's credit ledger entries
+  app.get("/api/customers/:id/ledger", async (req, res) => {
+    try {
+      const { getCustomerLedger } = await import("./lib/pos-engine");
+      const entries = await getCustomerLedger(req.params.id);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching customer ledger:", error);
+      res.status(500).json({ error: "Failed to fetch customer ledger" });
+    }
+  });
+
+  // Add payment to customer account
+  app.post("/api/customers/:id/payment", async (req, res) => {
+    try {
+      const { amount, description } = req.body;
+      if (typeof amount !== "number" || amount <= 0) {
+        return res.status(400).json({ error: "Invalid payment amount" });
+      }
+      const { addCustomerPayment, POSError } = await import("./lib/pos-engine");
+      try {
+        await addCustomerPayment(req.params.id, amount, description);
+        res.json({ success: true });
+      } catch (error) {
+        if (error instanceof POSError) {
+          return res.status(400).json({ error: error.message, code: error.code });
+        }
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error adding payment:", error);
+      res.status(500).json({ error: "Failed to add payment" });
+    }
+  });
+
+  // Complete sale with stock updates and credit handling (uses POS Engine)
   app.post("/api/sales/complete", async (req, res) => {
     try {
       const parsed = saleSchema.omit({ id: true }).safeParse(req.body);
@@ -238,42 +273,17 @@ export async function registerRoutes(
       }
 
       const saleData = parsed.data;
+      const { processSale, POSError } = await import("./lib/pos-engine");
 
-      // Update product stock
-      for (const item of saleData.items) {
-        const product = await storage.getProduct(item.productId);
-        if (product) {
-          await storage.updateProduct(item.productId, {
-            stock: Math.max(0, product.stock - item.quantity),
-          });
+      try {
+        const result = await processSale(saleData);
+        res.status(201).json({ id: result.saleId, success: result.success });
+      } catch (error) {
+        if (error instanceof POSError) {
+          return res.status(400).json({ error: error.message, code: error.code });
         }
+        throw error;
       }
-
-      // Handle credit payment
-      if (saleData.paymentMethod === "credit" && saleData.customerId) {
-        const customer = await storage.getCustomer(saleData.customerId);
-        if (customer) {
-          const newBalance = customer.currentBalance + saleData.total;
-          await storage.updateCustomer(saleData.customerId, {
-            currentBalance: newBalance,
-          });
-
-          // Create credit ledger entry
-          await storage.createCreditLedgerEntry({
-            customerId: customer.id,
-            customerName: customer.name,
-            type: "charge",
-            amount: saleData.total,
-            balanceAfter: newBalance,
-            description: `Sale - ${saleData.items.length} item(s)`,
-            timestamp: saleData.timestamp,
-          });
-        }
-      }
-
-      // Create the sale record
-      const sale = await storage.createSale(saleData);
-      res.status(201).json(sale);
     } catch (error) {
       console.error("Error completing sale:", error);
       res.status(500).json({ error: "Failed to complete sale" });

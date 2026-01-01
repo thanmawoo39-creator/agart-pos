@@ -14,6 +14,7 @@ import Customers from "@/pages/customers";
 import Reports from "@/pages/reports";
 import Inventory from "@/pages/inventory";
 import Ledger from "@/pages/ledger";
+import CustomerProfile from "@/pages/customer-profile";
 
 function Router() {
   return (
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/sales" component={Sales} />
       <Route path="/products" component={Products} />
       <Route path="/inventory" component={Inventory} />
+      <Route path="/customers/:id" component={CustomerProfile} />
       <Route path="/customers" component={Customers} />
       <Route path="/ledger" component={Ledger} />
       <Route path="/reports" component={Reports} />

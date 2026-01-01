@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
   CheckCircle,
   X,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import type { Product, Customer, InsertSale, SaleItem } from "@shared/schema";
 
@@ -30,6 +31,11 @@ export default function Sales() {
   const { toast } = useToast();
   const [scanInput, setScanInput] = useState("");
   const [customerScanInput, setCustomerScanInput] = useState("");
+  const [lastScannedProduct, setLastScannedProduct] = useState<string | null>(null);
+  
+  // Global barcode scanner state
+  const barcodeBuffer = useRef<string>("");
+  const barcodeTimeout = useRef<NodeJS.Timeout | null>(null);
   
   const {
     items,
@@ -131,6 +137,52 @@ export default function Sales() {
     [addItem, addAlert, toast]
   );
 
+  // Global barcode scanner listener
+  // Barcode scanners typically send characters very rapidly followed by Enter
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input field
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {
+        return;
+      }
+
+      // Clear previous timeout
+      if (barcodeTimeout.current) {
+        clearTimeout(barcodeTimeout.current);
+      }
+
+      // Handle Enter key - process the barcode
+      if (e.key === "Enter" && barcodeBuffer.current.length > 0) {
+        const barcode = barcodeBuffer.current;
+        barcodeBuffer.current = "";
+        handleScan(barcode);
+        setLastScannedProduct(barcode);
+        // Clear highlight after 2 seconds
+        setTimeout(() => setLastScannedProduct(null), 2000);
+        return;
+      }
+
+      // Only accumulate alphanumeric characters
+      if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
+        barcodeBuffer.current += e.key;
+        
+        // Reset buffer after 100ms of inactivity (scanner is very fast)
+        barcodeTimeout.current = setTimeout(() => {
+          barcodeBuffer.current = "";
+        }, 100);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (barcodeTimeout.current) {
+        clearTimeout(barcodeTimeout.current);
+      }
+    };
+  }, [handleScan]);
+
   // Handle customer scan
   const handleCustomerScan = useCallback(
     async (barcode: string) => {
@@ -216,6 +268,27 @@ export default function Sales() {
   });
 
   const handlePayment = (method: "cash" | "card" | "credit") => {
+    // Validate credit payment
+    if (method === "credit") {
+      if (!linkedCustomer) {
+        toast({
+          title: "Customer Required",
+          description: "Please link a customer before using credit payment",
+          variant: "destructive",
+        });
+        return;
+      }
+      // Check if sale exceeds credit limit
+      const newBalance = linkedCustomer.currentBalance + getTotal();
+      if (linkedCustomer.creditLimit > 0 && newBalance > linkedCustomer.creditLimit) {
+        toast({
+          title: "Credit Limit Exceeded",
+          description: `This sale would exceed ${linkedCustomer.name}'s credit limit`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
     completeSaleMutation.mutate(method);
   };
 
@@ -259,13 +332,17 @@ export default function Sales() {
                 </div>
               ) : products && products.length > 0 ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {products.map((product) => (
+                  {products.map((product) => {
+                    const isRecentlyScanned = lastScannedProduct === product.barcode;
+                    return (
                     <Button
                       key={product.id}
                       variant="outline"
-                      className="h-auto py-3 px-3 flex flex-col items-start gap-1 text-left"
+                      className={`h-auto py-3 px-3 flex flex-col items-start gap-1 text-left transition-all ${isRecentlyScanned ? "ring-2 ring-emerald-500 bg-emerald-50 dark:bg-emerald-950" : ""}`}
                       onClick={() => {
                         addItem(product, 1);
+                        setLastScannedProduct(product.barcode || null);
+                        setTimeout(() => setLastScannedProduct(null), 2000);
                         if (product.stock < 5) {
                           addAlert({
                             type: "tip",
@@ -287,7 +364,8 @@ export default function Sales() {
                         )}
                       </div>
                     </Button>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground text-sm">
