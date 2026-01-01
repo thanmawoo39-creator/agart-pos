@@ -344,7 +344,7 @@ export async function initializeMockData(): Promise<void> {
   const products = await getProducts();
   
   // If already initialized with valid data, skip
-  if (initialized === "v8" && products.length > 0) return;
+  if (initialized === "v9" && products.length > 0) return;
   
   // Clear any existing data and reinitialize
   await clearAllData();
@@ -354,6 +354,7 @@ export async function initializeMockData(): Promise<void> {
     {
       name: "Coffee (Large)",
       price: 4.99,
+      cost: 2.50,
       barcode: "1234567890123",
       stock: 50,
       minStockLevel: 10,
@@ -363,6 +364,7 @@ export async function initializeMockData(): Promise<void> {
     {
       name: "Bread (Whole Wheat)",
       price: 3.49,
+      cost: 1.80,
       barcode: "1234567890124",
       stock: 5,
       minStockLevel: 10,
@@ -372,6 +374,7 @@ export async function initializeMockData(): Promise<void> {
     {
       name: "Milk (1 Gallon)",
       price: 5.99,
+      cost: 3.50,
       barcode: "1234567890125",
       stock: 3,
       minStockLevel: 8,
@@ -381,6 +384,7 @@ export async function initializeMockData(): Promise<void> {
     {
       name: "Orange Juice",
       price: 6.49,
+      cost: 3.20,
       barcode: "1234567890126",
       stock: 25,
       minStockLevel: 5,
@@ -465,7 +469,7 @@ export async function initializeMockData(): Promise<void> {
     status: "active",
   });
 
-  await db.set(KEYS.INITIALIZED, "v8");
+  await db.set(KEYS.INITIALIZED, "v9");
 }
 
 // Inventory Log CRUD

@@ -5,6 +5,7 @@ export const productSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   price: z.number().positive(),
+  cost: z.number().min(0).optional(), // Cost price for profit margin calculation
   barcode: z.string().optional(),
   stock: z.number().int().min(0),
   minStockLevel: z.number().int().min(0),

@@ -61,6 +61,7 @@ export default function Inventory() {
     name: "",
     barcode: "",
     price: "",
+    cost: "",
     stock: "",
     minStockLevel: "",
     category: "",
@@ -158,6 +159,7 @@ export default function Inventory() {
       name: "",
       barcode: "",
       price: "",
+      cost: "",
       stock: "",
       minStockLevel: "",
       category: "",
@@ -202,10 +204,13 @@ export default function Inventory() {
     const stock = parseInt(newProduct.stock) || 0;
     const minStock = parseInt(newProduct.minStockLevel) || 5;
 
+    const cost = parseFloat(newProduct.cost);
+    
     createProductMutation.mutate({
       name: newProduct.name.trim(),
       barcode: newProduct.barcode.trim() || undefined,
       price,
+      cost: isNaN(cost) ? undefined : cost,
       stock,
       minStockLevel: minStock,
       category: newProduct.category.trim() || undefined,
@@ -334,6 +339,7 @@ export default function Inventory() {
                   <TableHead className="hidden md:table-cell">Category</TableHead>
                   <TableHead className="hidden lg:table-cell">Barcode</TableHead>
                   <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-right hidden md:table-cell">Margin</TableHead>
                   <TableHead className="text-center">Stock</TableHead>
                   <TableHead className="text-right hidden sm:table-cell">Value</TableHead>
                   <TableHead className="text-center hidden sm:table-cell">Min</TableHead>
@@ -345,6 +351,9 @@ export default function Inventory() {
                 {filteredProducts.map((product) => {
                   const isLowStock = product.stock <= product.minStockLevel;
                   const stockValue = product.price * product.stock;
+                  const profitMargin = product.cost && product.cost > 0
+                    ? ((product.price - product.cost) / product.price * 100).toFixed(1)
+                    : null;
                   return (
                     <TableRow
                       key={product.id}
@@ -367,6 +376,15 @@ export default function Inventory() {
                       </TableCell>
                       <TableCell className="text-right">
                         ${product.price.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-right hidden md:table-cell">
+                        {profitMargin ? (
+                          <span className={parseFloat(profitMargin) >= 20 ? "text-emerald-600 font-medium" : "text-muted-foreground"}>
+                            {profitMargin}%
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-center">
                         <span className={isLowStock ? "text-destructive font-bold" : "font-medium"}>
@@ -428,7 +446,7 @@ export default function Inventory() {
                 })}
                 {filteredProducts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={canManageStock ? 9 : 8} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={canManageStock ? 10 : 9} className="text-center py-8 text-muted-foreground">
                       No products found
                     </TableCell>
                   </TableRow>
@@ -485,7 +503,7 @@ export default function Inventory() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="product-price">
-                  Price <span className="text-destructive">*</span>
+                  Selling Price <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   id="product-price"
@@ -499,6 +517,21 @@ export default function Inventory() {
                 />
               </div>
               <div className="space-y-2">
+                <Label htmlFor="product-cost">Cost Price</Label>
+                <Input
+                  id="product-cost"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newProduct.cost}
+                  onChange={(e) => setNewProduct((prev) => ({ ...prev, cost: e.target.value }))}
+                  placeholder="0.00"
+                  data-testid="input-product-cost"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
                 <Label htmlFor="product-stock">Initial Stock</Label>
                 <Input
                   id="product-stock"
@@ -510,8 +543,6 @@ export default function Inventory() {
                   data-testid="input-product-stock"
                 />
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="product-min-stock">Min Stock Level</Label>
                 <Input
@@ -524,6 +555,8 @@ export default function Inventory() {
                   data-testid="input-product-min-stock"
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="product-unit">Unit</Label>
                 <Select
@@ -545,16 +578,16 @@ export default function Inventory() {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="product-category">Category</Label>
-              <Input
-                id="product-category"
-                value={newProduct.category}
-                onChange={(e) => setNewProduct((prev) => ({ ...prev, category: e.target.value }))}
-                placeholder="e.g., Groceries, Dairy, Electronics"
-                data-testid="input-product-category"
-              />
+              <div className="space-y-2">
+                <Label htmlFor="product-category">Category</Label>
+                <Input
+                  id="product-category"
+                  value={newProduct.category}
+                  onChange={(e) => setNewProduct((prev) => ({ ...prev, category: e.target.value }))}
+                  placeholder="e.g., Groceries"
+                  data-testid="input-product-category"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
