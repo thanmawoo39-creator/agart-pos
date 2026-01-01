@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt, UserCog } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt, UserCog, ClipboardList } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -10,26 +10,44 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarFooter,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/lib/auth-context";
+import type { StaffRole } from "@shared/schema";
 
-const navItems = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Sales (POS)", url: "/sales", icon: ShoppingCart },
-  { title: "Inventory", url: "/inventory", icon: Boxes },
-  { title: "Customers", url: "/customers", icon: Users },
-  { title: "Ledger", url: "/ledger", icon: Receipt },
-  { title: "Reports", url: "/reports", icon: BarChart3 },
+interface NavItem {
+  title: string;
+  url: string;
+  icon: typeof LayoutDashboard;
+  roles: StaffRole[];
+}
+
+const navItems: NavItem[] = [
+  { title: "Dashboard", url: "/", icon: LayoutDashboard, roles: ["owner", "manager"] },
+  { title: "Sales (POS)", url: "/sales", icon: ShoppingCart, roles: ["owner", "manager", "cashier"] },
+  { title: "Inventory", url: "/inventory", icon: Boxes, roles: ["owner", "manager"] },
+  { title: "Customers", url: "/customers", icon: Users, roles: ["owner", "manager", "cashier"] },
+  { title: "Ledger", url: "/ledger", icon: Receipt, roles: ["owner", "manager"] },
+  { title: "Reports", url: "/reports", icon: BarChart3, roles: ["owner", "manager"] },
 ];
 
-const adminItems = [
-  { title: "Staff", url: "/staff", icon: UserCog },
+const adminItems: NavItem[] = [
+  { title: "Staff", url: "/staff", icon: UserCog, roles: ["owner"] },
+  { title: "Attendance", url: "/attendance", icon: ClipboardList, roles: ["owner"] },
 ];
 
 export function AppSidebar() {
   const [location] = useLocation();
-  const { isOwner } = useAuth();
+  const { currentStaff, isLoggedIn, isOwner } = useAuth();
+
+  const currentRole = currentStaff?.role || "cashier";
+
+  const canAccess = (roles: StaffRole[]) => {
+    if (!isLoggedIn) return true;
+    return roles.includes(currentRole);
+  };
+
+  const filteredNavItems = navItems.filter(item => canAccess(item.roles));
+  const filteredAdminItems = adminItems.filter(item => canAccess(item.roles));
 
   return (
     <Sidebar>
@@ -50,7 +68,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
+              {filteredNavItems.map((item) => {
                 const isActive = location === item.url;
                 return (
                   <SidebarMenuItem key={item.title}>
@@ -70,12 +88,12 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        {isOwner && (
+        {filteredAdminItems.length > 0 && (
           <SidebarGroup>
             <SidebarGroupLabel className="px-3 text-xs text-muted-foreground">Admin</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {adminItems.map((item) => {
+                {filteredAdminItems.map((item) => {
                   const isActive = location === item.url;
                   return (
                     <SidebarMenuItem key={item.title}>

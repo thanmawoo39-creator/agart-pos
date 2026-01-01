@@ -4,11 +4,14 @@ import type {
   Sale,
   CreditLedger,
   Staff,
+  Attendance,
+  CurrentShift,
   InsertProduct,
   InsertCustomer,
   InsertSale,
   InsertCreditLedger,
   InsertStaff,
+  InsertAttendance,
   DashboardSummary,
 } from "@shared/schema";
 import * as db from "./lib/db";
@@ -46,6 +49,15 @@ export interface IStorage {
   deleteStaff(id: string): Promise<boolean>;
   suspendStaff(id: string): Promise<Staff | undefined>;
   activateStaff(id: string): Promise<Staff | undefined>;
+
+  // Attendance
+  getAttendance(): Promise<Attendance[]>;
+  getAttendanceByDate(date: string): Promise<Attendance[]>;
+  getAttendanceByStaff(staffId: string): Promise<Attendance[]>;
+  getCurrentShift(): Promise<CurrentShift>;
+  clockIn(staffId: string, staffName: string): Promise<Attendance>;
+  clockOut(attendanceId: string): Promise<Attendance | undefined>;
+  getAttendanceReport(startDate: string, endDate: string): Promise<Attendance[]>;
 
   // Dashboard
   getDashboardSummary(): Promise<DashboardSummary>;
@@ -150,6 +162,35 @@ export class POSStorage implements IStorage {
 
   async activateStaff(id: string): Promise<Staff | undefined> {
     return db.activateStaff(id);
+  }
+
+  // Attendance
+  async getAttendance(): Promise<Attendance[]> {
+    return db.getAttendance();
+  }
+
+  async getAttendanceByDate(date: string): Promise<Attendance[]> {
+    return db.getAttendanceByDate(date);
+  }
+
+  async getAttendanceByStaff(staffId: string): Promise<Attendance[]> {
+    return db.getAttendanceByStaff(staffId);
+  }
+
+  async getCurrentShift(): Promise<CurrentShift> {
+    return db.getCurrentShift();
+  }
+
+  async clockIn(staffId: string, staffName: string): Promise<Attendance> {
+    return db.clockIn(staffId, staffName);
+  }
+
+  async clockOut(attendanceId: string): Promise<Attendance | undefined> {
+    return db.clockOut(attendanceId);
+  }
+
+  async getAttendanceReport(startDate: string, endDate: string): Promise<Attendance[]> {
+    return db.getAttendanceReport(startDate, endDate);
   }
 
   // Dashboard

@@ -63,6 +63,13 @@ The current implementation uses Replit's key-value database with collection-base
 
 ### API Endpoints
 
+**Attendance**:
+- `GET /api/attendance/current` - Get current active shift
+- `POST /api/attendance/clock-in` - Clock in with PIN
+- `POST /api/attendance/clock-out` - Clock out with PIN
+- `GET /api/attendance/report` - Get attendance report (with optional startDate/endDate query params)
+- `GET /api/attendance` - Get all attendance records
+
 **AI Insights**:
 - `GET /api/ai/insights` - Dashboard AI insights (top debtors, stock warnings, daily summary)
 - `GET /api/ai/risk-analysis` - All customer risk analyses
@@ -95,9 +102,16 @@ The current implementation uses Replit's key-value database with collection-base
 - Cashier: PIN 3456 (STAFF003)
 
 **Role-Based UI Permissions**:
-- Owner: Full access (Dashboard, Sales, Products, Customers, Ledger, Reports, Staff)
-- Manager: Dashboard, Sales, Products, Customers, Ledger, Reports (no Staff page)
-- Cashier: Sales, Products, Customers (limited ledger view)
+- Owner: Full access (Dashboard, Sales, Inventory, Customers, Ledger, Reports, Staff, Attendance)
+- Manager: Dashboard, Sales, Inventory, Customers, Ledger, Reports (no Staff/Attendance pages)
+- Cashier: Sales, Customers only (no Dashboard, Inventory, Ledger, Reports, Staff, Attendance)
+
+**Clock-In/Clock-Out System**:
+- Attendance schema: { id, staffId, staffName, date, clockInTime, clockOutTime, totalHours }
+- Shift button on Dashboard and Sales page with big numeric PIN keypad
+- Sales page is blocked if no staff is clocked in
+- All sales are linked to the current shift's staff (createdBy field)
+- Green status indicator for clocked-in staff, grey for not working
 
 **Audit Trail**:
 - All sales and credit ledger entries include `createdBy` field

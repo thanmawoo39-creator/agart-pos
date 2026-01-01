@@ -1,9 +1,15 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { z } from "zod";
 import { storage } from "./storage";
 import { productSchema, customerSchema, saleSchema, creditLedgerSchema, staffSchema } from "@shared/schema";
 import { getAIInsights, getAllCustomerRiskAnalysis, analyzeCustomerRisk } from "./lib/ai-engine";
 import { findProductByBarcode, findCustomerByBarcode, getCustomerLedger, addCustomerPayment, processSale, POSError } from "./lib/pos-engine";
+
+// Validation schemas for attendance
+const pinSchema = z.object({
+  pin: z.string().length(4).regex(/^\d+$/, "PIN must be 4 digits"),
+});
 
 export async function registerRoutes(
   httpServer: Server,
@@ -416,6 +422,122 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error activating staff member:", error);
       res.status(500).json({ error: "Failed to activate staff member" });
+    }
+  });
+
+  // Attendance Management
+  app.get("/api/attendance/current", async (req, res) => {
+    try {
+      const shift = await storage.getCurrentShift();
+      res.json(shift);
+    } catch (error) {
+      console.error("Error getting current shift:", error);
+      res.status(500).json({ error: "Failed to get current shift" });
+    }
+  });
+
+  app.post("/api/attendance/clock-in", async (req, res) => {
+    try {
+      const parsed = pinSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "PIN must be exactly 4 digits" });
+      }
+      const { pin } = parsed.data;
+
+      const staffMember = await storage.getStaffByPin(pin);
+      if (!staffMember) {
+        return res.status(401).json({ error: "Invalid PIN" });
+      }
+
+      if (staffMember.status === "suspended") {
+        return res.status(401).json({ error: "Staff account is suspended" });
+      }
+
+      // Check if someone is already clocked in
+      const currentShift = await storage.getCurrentShift();
+      if (currentShift.isActive) {
+        return res.status(400).json({ 
+          error: `${currentShift.staffName} is already clocked in. Clock out first.` 
+        });
+      }
+
+      const attendance = await storage.clockIn(staffMember.id, staffMember.name);
+      res.json({ 
+        success: true, 
+        attendance,
+        staffName: staffMember.name
+      });
+    } catch (error) {
+      console.error("Error clocking in:", error);
+      res.status(500).json({ error: "Failed to clock in" });
+    }
+  });
+
+  app.post("/api/attendance/clock-out", async (req, res) => {
+    try {
+      const parsed = pinSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "PIN must be exactly 4 digits" });
+      }
+      const { pin } = parsed.data;
+
+      const staffMember = await storage.getStaffByPin(pin);
+      if (!staffMember) {
+        return res.status(401).json({ error: "Invalid PIN" });
+      }
+
+      // Get current shift
+      const currentShift = await storage.getCurrentShift();
+      if (!currentShift.isActive) {
+        return res.status(400).json({ error: "No active shift to clock out" });
+      }
+
+      // Verify the person clocking out is the one who clocked in
+      if (currentShift.staffId !== staffMember.id) {
+        return res.status(400).json({ 
+          error: `Only ${currentShift.staffName} can clock out this shift` 
+        });
+      }
+
+      const attendance = await storage.clockOut(currentShift.attendanceId!);
+      res.json({ 
+        success: true, 
+        attendance,
+        totalHours: attendance?.totalHours
+      });
+    } catch (error) {
+      console.error("Error clocking out:", error);
+      res.status(500).json({ error: "Failed to clock out" });
+    }
+  });
+
+  app.get("/api/attendance/report", async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) {
+        // Default to today
+        const today = new Date().toISOString().split("T")[0];
+        const attendance = await storage.getAttendanceByDate(today);
+        return res.json(attendance);
+      }
+      const attendance = await storage.getAttendanceReport(
+        startDate as string, 
+        endDate as string
+      );
+      res.json(attendance);
+    } catch (error) {
+      console.error("Error getting attendance report:", error);
+      res.status(500).json({ error: "Failed to get attendance report" });
+    }
+  });
+
+  app.get("/api/attendance", async (req, res) => {
+    try {
+      const attendance = await storage.getAttendance();
+      res.json(attendance);
+    } catch (error) {
+      console.error("Error getting attendance:", error);
+      res.status(500).json({ error: "Failed to get attendance" });
     }
   });
 

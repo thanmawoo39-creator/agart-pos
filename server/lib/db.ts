@@ -5,11 +5,14 @@ import type {
   Sale,
   CreditLedger,
   Staff,
+  Attendance,
+  CurrentShift,
   InsertProduct,
   InsertCustomer,
   InsertSale,
   InsertCreditLedger,
   InsertStaff,
+  InsertAttendance,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -22,6 +25,7 @@ const KEYS = {
   SALES: "sales",
   CREDIT_LEDGER: "creditLedger",
   STAFF: "staff",
+  ATTENDANCE: "attendance",
   INITIALIZED: "initialized",
 };
 
@@ -231,6 +235,91 @@ export async function deleteStaff(id: string): Promise<boolean> {
   return true;
 }
 
+// Attendance CRUD
+export async function getAttendance(): Promise<Attendance[]> {
+  return getCollection<Attendance>(KEYS.ATTENDANCE);
+}
+
+export async function getAttendanceByDate(date: string): Promise<Attendance[]> {
+  const attendance = await getAttendance();
+  return attendance.filter((a) => a.date === date);
+}
+
+export async function getAttendanceByStaff(staffId: string): Promise<Attendance[]> {
+  const attendance = await getAttendance();
+  return attendance.filter((a) => a.staffId === staffId);
+}
+
+export async function getCurrentShift(): Promise<CurrentShift> {
+  const today = new Date().toISOString().split("T")[0];
+  const attendance = await getAttendance();
+  const activeShift = attendance.find(
+    (a) => a.date === today && a.clockOutTime === null
+  );
+
+  if (activeShift) {
+    return {
+      isActive: true,
+      staffId: activeShift.staffId,
+      staffName: activeShift.staffName,
+      clockInTime: activeShift.clockInTime,
+      attendanceId: activeShift.id,
+    };
+  }
+
+  return {
+    isActive: false,
+    staffId: null,
+    staffName: null,
+    clockInTime: null,
+    attendanceId: null,
+  };
+}
+
+export async function clockIn(staffId: string, staffName: string): Promise<Attendance> {
+  const attendance = await getAttendance();
+  const today = new Date().toISOString().split("T")[0];
+  const now = new Date().toISOString();
+
+  const newAttendance: Attendance = {
+    id: randomUUID(),
+    staffId,
+    staffName,
+    date: today,
+    clockInTime: now,
+    clockOutTime: null,
+    totalHours: null,
+  };
+
+  attendance.push(newAttendance);
+  await setCollection(KEYS.ATTENDANCE, attendance);
+  return newAttendance;
+}
+
+export async function clockOut(attendanceId: string): Promise<Attendance | undefined> {
+  const attendance = await getAttendance();
+  const index = attendance.findIndex((a) => a.id === attendanceId);
+  if (index === -1) return undefined;
+
+  const now = new Date();
+  const clockInTime = new Date(attendance[index].clockInTime);
+  const totalHours = (now.getTime() - clockInTime.getTime()) / (1000 * 60 * 60);
+
+  attendance[index] = {
+    ...attendance[index],
+    clockOutTime: now.toISOString(),
+    totalHours: Math.round(totalHours * 100) / 100,
+  };
+
+  await setCollection(KEYS.ATTENDANCE, attendance);
+  return attendance[index];
+}
+
+export async function getAttendanceReport(startDate: string, endDate: string): Promise<Attendance[]> {
+  const attendance = await getAttendance();
+  return attendance.filter((a) => a.date >= startDate && a.date <= endDate);
+}
+
 // Clear all data (for reset)
 export async function clearAllData(): Promise<void> {
   await db.delete(KEYS.PRODUCTS);
@@ -238,6 +327,7 @@ export async function clearAllData(): Promise<void> {
   await db.delete(KEYS.SALES);
   await db.delete(KEYS.CREDIT_LEDGER);
   await db.delete(KEYS.STAFF);
+  await db.delete(KEYS.ATTENDANCE);
   await db.delete(KEYS.INITIALIZED);
 }
 

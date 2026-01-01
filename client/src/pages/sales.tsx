@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useStore } from "@/lib/store";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth-context";
+import { ShiftButton } from "@/components/shift-button";
 import {
   ShoppingCart,
   Search,
@@ -25,8 +26,9 @@ import {
   X,
   Sparkles,
   Zap,
+  Clock,
 } from "lucide-react";
-import type { Product, Customer, InsertSale, SaleItem } from "@shared/schema";
+import type { Product, Customer, InsertSale, SaleItem, CurrentShift } from "@shared/schema";
 
 export default function Sales() {
   const { toast } = useToast();
@@ -38,6 +40,12 @@ export default function Sales() {
   // Global barcode scanner state
   const barcodeBuffer = useRef<string>("");
   const barcodeTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Check if someone is clocked in
+  const { data: currentShift, isLoading: shiftLoading } = useQuery<CurrentShift>({
+    queryKey: ["/api/attendance/current"],
+    refetchInterval: 30000,
+  });
   
   const {
     items,
@@ -244,7 +252,7 @@ export default function Sales() {
         customerId: linkedCustomer?.id,
         storeId: "store-001",
         timestamp: new Date().toISOString(),
-        createdBy: currentStaff?.name || "Unknown",
+        createdBy: currentShift?.staffName || currentStaff?.name || "Unknown",
       };
 
       return apiRequest("POST", "/api/sales/complete", saleData);
@@ -295,8 +303,44 @@ export default function Sales() {
     completeSaleMutation.mutate(method);
   };
 
+  // Show shift required block if no one is clocked in
+  if (!shiftLoading && (!currentShift || !currentShift.isActive)) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center gap-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                <Clock className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-xl font-semibold">No Active Shift</h2>
+                <p className="text-sm text-muted-foreground">
+                  A staff member must clock in before processing sales. 
+                  Use the button below to start a shift.
+                </p>
+              </div>
+              <ShiftButton />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
+      {/* Shift Status Bar */}
+      <div className="flex items-center justify-between gap-4 px-3 py-2 md:px-4 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-800">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+            {currentShift?.staffName} on shift
+          </span>
+        </div>
+        <ShiftButton />
+      </div>
+
       {/* Main Content */}
       <div className="flex-1 flex flex-col lg:flex-row gap-3 p-3 md:p-4 overflow-hidden">
         {/* Left: Product Grid */}

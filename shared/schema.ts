@@ -122,3 +122,26 @@ export interface DashboardSummary {
 export interface CartItem extends SaleItem {
   product: Product;
 }
+
+// Attendance schema for clock-in/clock-out
+export const attendanceSchema = z.object({
+  id: z.string(),
+  staffId: z.string(),
+  staffName: z.string(),
+  date: z.string(), // YYYY-MM-DD format
+  clockInTime: z.string(), // ISO timestamp
+  clockOutTime: z.string().nullable(), // ISO timestamp or null if still working
+  totalHours: z.number().nullable(), // Calculated on clock out
+});
+
+export type Attendance = z.infer<typeof attendanceSchema>;
+export type InsertAttendance = Omit<Attendance, "id">;
+
+// Current shift info for UI
+export interface CurrentShift {
+  isActive: boolean;
+  staffId: string | null;
+  staffName: string | null;
+  clockInTime: string | null;
+  attendanceId: string | null;
+}

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ShiftButton } from "@/components/shift-button";
 import { 
   DollarSign, 
   CreditCard, 
@@ -84,6 +85,7 @@ export default function Dashboard() {
             })}
           </p>
         </div>
+        <ShiftButton />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
