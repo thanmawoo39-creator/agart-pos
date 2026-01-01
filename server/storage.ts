@@ -1,38 +1,125 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import type {
+  Product,
+  Customer,
+  Sale,
+  CreditLedger,
+  InsertProduct,
+  InsertCustomer,
+  InsertSale,
+  InsertCreditLedger,
+  DashboardSummary,
+} from "@shared/schema";
+import * as db from "./lib/db";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  // Products
+  getProducts(): Promise<Product[]>;
+  getProduct(id: string): Promise<Product | undefined>;
+  createProduct(product: InsertProduct): Promise<Product>;
+  updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined>;
+  deleteProduct(id: string): Promise<boolean>;
+
+  // Customers
+  getCustomers(): Promise<Customer[]>;
+  getCustomer(id: string): Promise<Customer | undefined>;
+  createCustomer(customer: InsertCustomer): Promise<Customer>;
+  updateCustomer(id: string, updates: Partial<InsertCustomer>): Promise<Customer | undefined>;
+
+  // Sales
+  getSales(): Promise<Sale[]>;
+  getSale(id: string): Promise<Sale | undefined>;
+  createSale(sale: InsertSale): Promise<Sale>;
+
+  // Credit Ledger
+  getCreditLedger(): Promise<CreditLedger[]>;
+  createCreditLedgerEntry(entry: InsertCreditLedger): Promise<CreditLedger>;
+
+  // Dashboard
+  getDashboardSummary(): Promise<DashboardSummary>;
+
+  // Initialization
+  initialize(): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class POSStorage implements IStorage {
+  // Products
+  async getProducts(): Promise<Product[]> {
+    return db.getProducts();
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getProduct(id: string): Promise<Product | undefined> {
+    return db.getProduct(id);
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async createProduct(product: InsertProduct): Promise<Product> {
+    return db.createProduct(product);
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined> {
+    return db.updateProduct(id, updates);
+  }
+
+  async deleteProduct(id: string): Promise<boolean> {
+    return db.deleteProduct(id);
+  }
+
+  // Customers
+  async getCustomers(): Promise<Customer[]> {
+    return db.getCustomers();
+  }
+
+  async getCustomer(id: string): Promise<Customer | undefined> {
+    return db.getCustomer(id);
+  }
+
+  async createCustomer(customer: InsertCustomer): Promise<Customer> {
+    return db.createCustomer(customer);
+  }
+
+  async updateCustomer(id: string, updates: Partial<InsertCustomer>): Promise<Customer | undefined> {
+    return db.updateCustomer(id, updates);
+  }
+
+  // Sales
+  async getSales(): Promise<Sale[]> {
+    return db.getSales();
+  }
+
+  async getSale(id: string): Promise<Sale | undefined> {
+    return db.getSale(id);
+  }
+
+  async createSale(sale: InsertSale): Promise<Sale> {
+    return db.createSale(sale);
+  }
+
+  // Credit Ledger
+  async getCreditLedger(): Promise<CreditLedger[]> {
+    return db.getCreditLedger();
+  }
+
+  async createCreditLedgerEntry(entry: InsertCreditLedger): Promise<CreditLedger> {
+    return db.createCreditLedgerEntry(entry);
+  }
+
+  // Dashboard
+  async getDashboardSummary(): Promise<DashboardSummary> {
+    const todaySales = await db.getTodaySales();
+    const totalSalesToday = todaySales.reduce((sum, sale) => sum + sale.total, 0);
+    const totalCreditBalance = await db.getTotalCreditBalance();
+    const lowStockItems = await db.getLowStockProducts();
+
+    return {
+      totalSalesToday,
+      totalCreditBalance,
+      lowStockItems,
+    };
+  }
+
+  // Initialize with mock data
+  async initialize(): Promise<void> {
+    await db.initializeMockData();
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new POSStorage();
