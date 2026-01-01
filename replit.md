@@ -82,7 +82,7 @@ The current implementation uses Replit's key-value database with collection-base
 ### Staff Management & Authentication
 
 **Staff Schema**: `server/lib/db.ts` and `shared/schema.ts`
-- id, name, pin (4-digit), role (owner/manager/cashier), barcode, active
+- id, name, pin (4-digit), role (owner/manager/cashier), barcode, status (active/suspended)
 
 **Auth Context** (`client/src/lib/auth-context.tsx`):
 - Session management with localStorage persistence
