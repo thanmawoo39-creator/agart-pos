@@ -541,6 +541,67 @@ export async function registerRoutes(
     }
   });
 
+  // Inventory Management
+  app.get("/api/inventory/logs", async (req, res) => {
+    try {
+      const logs = await storage.getInventoryLogs();
+      res.json(logs);
+    } catch (error) {
+      console.error("Error getting inventory logs:", error);
+      res.status(500).json({ error: "Failed to get inventory logs" });
+    }
+  });
+
+  app.get("/api/inventory/logs/:productId", async (req, res) => {
+    try {
+      const logs = await storage.getInventoryLogsByProduct(req.params.productId);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error getting product inventory logs:", error);
+      res.status(500).json({ error: "Failed to get product inventory logs" });
+    }
+  });
+
+  // Stock adjustment schema for validation
+  const stockAdjustmentSchema = z.object({
+    quantityChange: z.number().int(),
+    type: z.enum(["stock-in", "adjustment"]),
+    reason: z.string().min(1, "Reason is required"),
+    staffId: z.string().optional(),
+    staffName: z.string().optional(),
+  });
+
+  app.post("/api/inventory/adjust/:productId", async (req, res) => {
+    try {
+      const parsed = stockAdjustmentSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ 
+          error: "Invalid request", 
+          details: parsed.error.errors 
+        });
+      }
+
+      const { quantityChange, type, reason, staffId, staffName } = parsed.data;
+      const result = await storage.adjustStock(
+        req.params.productId,
+        quantityChange,
+        type,
+        staffId,
+        staffName,
+        reason
+      );
+
+      if (!result) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error adjusting stock:", error);
+      res.status(500).json({ error: "Failed to adjust stock" });
+    }
+  });
+
   // Staff Authentication
   app.post("/api/auth/login", async (req, res) => {
     try {
