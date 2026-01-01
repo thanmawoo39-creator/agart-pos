@@ -4,6 +4,7 @@ import { z } from "zod";
 import { storage } from "./storage";
 import { productSchema, customerSchema, saleSchema, creditLedgerSchema, staffSchema, expenseSchema } from "@shared/schema";
 import { getAIInsights, getAllCustomerRiskAnalysis, analyzeCustomerRisk, getProfitLossReport, getExpenseInsights } from "./lib/ai-engine";
+import { askGeminiAboutBusiness, generatePnLExecutiveSummary, generateDebtReminderMessage, type BusinessContext, type DebtContext } from "./lib/gemini";
 import { findProductByBarcode, findCustomerByBarcode, getCustomerLedger, addCustomerPayment, processSale, POSError } from "./lib/pos-engine";
 
 // Validation schemas for attendance
@@ -738,5 +739,191 @@ export async function registerRoutes(
     }
   });
 
+  // Gemini Virtual CFO - Ask about business
+  app.post("/api/gemini/ask", async (req, res) => {
+    try {
+      const { question } = req.body;
+      if (!question || typeof question !== "string") {
+        return res.status(400).json({ error: "Question is required" });
+      }
+
+      // Gather business context
+      const context = await gatherBusinessContext();
+      const response = await askGeminiAboutBusiness(question, context);
+      res.json({ response });
+    } catch (error) {
+      console.error("Error asking Gemini:", error);
+      res.status(500).json({ error: "Failed to get AI response" });
+    }
+  });
+
+  // Gemini P&L Executive Summary
+  app.get("/api/gemini/pnl-summary", async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      const context = await gatherBusinessContext(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+      const summary = await generatePnLExecutiveSummary(context);
+      res.json({ summary });
+    } catch (error) {
+      console.error("Error generating P&L summary:", error);
+      res.status(500).json({ error: "Failed to generate executive summary" });
+    }
+  });
+
+  // Gemini Debt Reminder Message
+  app.post("/api/gemini/debt-reminder", async (req, res) => {
+    try {
+      const { customerId, baseMessage } = req.body;
+      if (!customerId || !baseMessage) {
+        return res.status(400).json({ error: "customerId and baseMessage are required" });
+      }
+
+      const customer = await storage.getCustomer(customerId);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+
+      // Get customer's ledger for payment history analysis
+      const ledger = await getCustomerLedger(customerId);
+      const lastPayment = ledger
+        .filter((entry) => entry.type === "payment")
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+      const daysSinceLastPayment = lastPayment
+        ? Math.floor((Date.now() - new Date(lastPayment.timestamp).getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+
+      const totalPayments = ledger.filter((e) => e.type === "payment").length;
+      const paymentHistory: "good" | "average" | "poor" =
+        totalPayments > 10 ? "good" : totalPayments > 3 ? "average" : "poor";
+
+      const utilizationPercent = customer.creditLimit > 0
+        ? (customer.currentBalance / customer.creditLimit) * 100
+        : 0;
+
+      const debtContext: DebtContext = {
+        totalDebt: customer.currentBalance,
+        creditLimit: customer.creditLimit,
+        utilizationPercent,
+        daysSinceLastPayment,
+        isLoyalCustomer: totalPayments > 10,
+        paymentHistory,
+      };
+
+      const personalizedMessage = await generateDebtReminderMessage(debtContext, baseMessage);
+      res.json({ message: personalizedMessage });
+    } catch (error) {
+      console.error("Error generating debt reminder:", error);
+      res.status(500).json({ error: "Failed to generate reminder message" });
+    }
+  });
+
   return httpServer;
+}
+
+// Helper function to gather business context for Gemini
+async function gatherBusinessContext(
+  startDate?: string,
+  endDate?: string
+): Promise<BusinessContext> {
+  const now = new Date();
+  const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = endDate ? new Date(endDate) : now;
+  
+  const [sales, products, customers, expenses] = await Promise.all([
+    storage.getSales(),
+    storage.getProducts(),
+    storage.getCustomers(),
+    storage.getExpenses(),
+  ]);
+
+  // Filter sales and expenses by date range
+  const filteredSales = sales.filter((s) => {
+    const saleDate = new Date(s.timestamp);
+    return saleDate >= start && saleDate <= end;
+  });
+
+  const filteredExpenses = expenses.filter((e) => {
+    const expenseDate = new Date(e.date);
+    return expenseDate >= start && expenseDate <= end;
+  });
+
+  // Calculate totals
+  const totalRevenue = filteredSales.reduce((sum, s) => sum + s.total, 0);
+  const cashSales = filteredSales.filter((s) => s.paymentMethod === "cash").reduce((sum, s) => sum + s.total, 0);
+  const creditSales = filteredSales.filter((s) => s.paymentMethod === "credit").reduce((sum, s) => sum + s.total, 0);
+  const cardSales = filteredSales.filter((s) => s.paymentMethod === "card").reduce((sum, s) => sum + s.total, 0);
+
+  // Calculate COGS
+  const cogs = filteredSales.reduce((sum, sale) => {
+    return sum + sale.items.reduce((itemSum, item) => {
+      const product = products.find((p) => p.id === item.productId);
+      const cost = product?.cost ?? 0;
+      return itemSum + cost * item.quantity;
+    }, 0);
+  }, 0);
+
+  const grossProfit = totalRevenue - cogs;
+
+  // Expenses by category
+  const expensesByCategory: Record<string, number> = {};
+  filteredExpenses.forEach((e) => {
+    expensesByCategory[e.category] = (expensesByCategory[e.category] || 0) + e.amount;
+  });
+  const totalExpenses = Object.values(expensesByCategory).reduce((sum, v) => sum + v, 0);
+
+  const netProfit = grossProfit - totalExpenses;
+  const netProfitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+  // Top products by quantity sold
+  const productSales: Record<string, { quantity: number; revenue: number }> = {};
+  filteredSales.forEach((sale) => {
+    sale.items.forEach((item) => {
+      if (!productSales[item.productId]) {
+        productSales[item.productId] = { quantity: 0, revenue: 0 };
+      }
+      productSales[item.productId].quantity += item.quantity;
+      productSales[item.productId].revenue += item.total;
+    });
+  });
+
+  const topProducts = Object.entries(productSales)
+    .map(([id, data]) => {
+      const product = products.find((p) => p.id === id);
+      return { name: product?.name || "Unknown", ...data };
+    })
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 5);
+
+  // Low stock products
+  const lowStockProducts = products
+    .filter((p) => p.stock <= (p.minStockLevel || 10))
+    .map((p) => ({ name: p.name, stock: p.stock }))
+    .slice(0, 5);
+
+  // Outstanding debt
+  const totalOutstandingDebt = customers.reduce((sum, c) => sum + c.currentBalance, 0);
+
+  const period = `${start.toLocaleDateString("my-MM")} - ${end.toLocaleDateString("my-MM")}`;
+
+  return {
+    totalSales: filteredSales.length,
+    totalRevenue,
+    cashSales,
+    creditSales,
+    cardSales,
+    totalExpenses,
+    expensesByCategory,
+    grossProfit,
+    netProfit,
+    netProfitMargin,
+    topProducts,
+    lowStockProducts,
+    totalCustomers: customers.length,
+    totalOutstandingDebt,
+    period,
+  };
 }

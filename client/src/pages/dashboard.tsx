@@ -1,8 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ShiftButton } from "@/components/shift-button";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useAuth } from "@/lib/auth-context";
+import { apiRequest } from "@/lib/queryClient";
 import { 
   DollarSign, 
   CreditCard, 
@@ -16,7 +23,10 @@ import {
   Banknote,
   Smartphone,
   Wallet,
-  PiggyBank
+  PiggyBank,
+  MessageCircle,
+  Send,
+  Loader2
 } from "lucide-react";
 import type { DashboardSummary, ProfitLossReport } from "@shared/schema";
 
@@ -56,7 +66,17 @@ interface AIInsights {
   riskySummary: string;
 }
 
+interface GeminiMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export default function Dashboard() {
+  const { isOwner } = useAuth();
+  const [geminiOpen, setGeminiOpen] = useState(false);
+  const [geminiQuestion, setGeminiQuestion] = useState("");
+  const [geminiMessages, setGeminiMessages] = useState<GeminiMessage[]>([]);
+
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const pnlStartDate = startOfMonth.toISOString().split("T")[0];
@@ -74,6 +94,26 @@ export default function Dashboard() {
   const { data: pnlReport, isLoading: pnlLoading } = useQuery<ProfitLossReport>({
     queryKey: [pnlUrl],
   });
+
+  const geminiMutation = useMutation({
+    mutationFn: async (question: string) => {
+      const response = await apiRequest("POST", "/api/gemini/ask", { question });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setGeminiMessages((prev) => [...prev, { role: "assistant", content: data.response }]);
+    },
+    onError: () => {
+      setGeminiMessages((prev) => [...prev, { role: "assistant", content: "တုံ့ပြန်မှုမရရှိပါ။ ထပ်စမ်းကြည့်ပါ။" }]);
+    },
+  });
+
+  const handleAskGemini = () => {
+    if (!geminiQuestion.trim() || geminiMutation.isPending) return;
+    setGeminiMessages((prev) => [...prev, { role: "user", content: geminiQuestion }]);
+    geminiMutation.mutate(geminiQuestion);
+    setGeminiQuestion("");
+  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -504,19 +544,103 @@ export default function Dashboard() {
         className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50"
         data-testid="ai-assistant-floating"
       >
-        <div className="bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-2xl shadow-lg p-3 md:p-4 max-w-[200px] md:max-w-[260px]">
-          <div className="flex items-start gap-2 md:gap-3">
-            <div className="flex-shrink-0 w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/20 flex items-center justify-center">
-              <Bot className="w-4 h-4 md:w-5 md:h-5 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] md:text-xs font-medium opacity-80 mb-0.5 md:mb-1">AI Assistant</p>
-              <p className="text-xs md:text-sm leading-snug">
-                {insightsLoading ? "Analyzing..." : aiInsights?.riskySummary ?? "All systems healthy."}
-              </p>
+        {isOwner ? (
+          <Dialog open={geminiOpen} onOpenChange={setGeminiOpen}>
+            <DialogTrigger asChild>
+              <button
+                className="bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-2xl shadow-lg p-3 md:p-4 max-w-[200px] md:max-w-[260px] cursor-pointer hover:shadow-xl transition-shadow"
+                data-testid="button-open-gemini-chat"
+              >
+                <div className="flex items-start gap-2 md:gap-3">
+                  <div className="flex-shrink-0 w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/20 flex items-center justify-center">
+                    <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="text-[10px] md:text-xs font-medium opacity-80 mb-0.5 md:mb-1">Gemini CFO</p>
+                    <p className="text-xs md:text-sm leading-snug">
+                      {insightsLoading ? "Analyzing..." : "စီးပွားရေး အကြံဉာဏ် မေးပါ"}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-indigo-500" />
+                  Virtual CFO - စီးပွားရေး အကြံပေး
+                </DialogTitle>
+              </DialogHeader>
+              <ScrollArea className="flex-1 min-h-[300px] max-h-[400px] pr-4">
+                <div className="space-y-4">
+                  {geminiMessages.length === 0 && (
+                    <div className="text-center text-muted-foreground py-8">
+                      <Sparkles className="w-12 h-12 mx-auto mb-4 text-indigo-500/50" />
+                      <p className="text-sm">သင့်စီးပွားရေးအကြောင်း မေးခွန်းများ မေးနိုင်ပါသည်။</p>
+                      <p className="text-xs mt-2">ဥပမာ: "ဘယ်ကုန်ကျစရိတ်ကို လျှော့ချသင့်လဲ?"</p>
+                    </div>
+                  )}
+                  {geminiMessages.map((msg, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                      data-testid={`gemini-message-${idx}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                          msg.role === "user"
+                            ? "bg-indigo-500 text-white"
+                            : "bg-muted"
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                    </div>
+                  ))}
+                  {geminiMutation.isPending && (
+                    <div className="flex justify-start">
+                      <div className="bg-muted rounded-lg px-3 py-2 text-sm flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        စဉ်းစားနေပါသည်...
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+              <div className="flex gap-2 mt-4 pt-4 border-t">
+                <Input
+                  placeholder="သင့်မေးခွန်းကို ထည့်ပါ..."
+                  value={geminiQuestion}
+                  onChange={(e) => setGeminiQuestion(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAskGemini()}
+                  disabled={geminiMutation.isPending}
+                  data-testid="input-gemini-question"
+                />
+                <Button
+                  onClick={handleAskGemini}
+                  disabled={!geminiQuestion.trim() || geminiMutation.isPending}
+                  data-testid="button-send-gemini"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        ) : (
+          <div className="bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-2xl shadow-lg p-3 md:p-4 max-w-[200px] md:max-w-[260px]">
+            <div className="flex items-start gap-2 md:gap-3">
+              <div className="flex-shrink-0 w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/20 flex items-center justify-center">
+                <Bot className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] md:text-xs font-medium opacity-80 mb-0.5 md:mb-1">AI Assistant</p>
+                <p className="text-xs md:text-sm leading-snug">
+                  {insightsLoading ? "Analyzing..." : aiInsights?.riskySummary ?? "All systems healthy."}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
