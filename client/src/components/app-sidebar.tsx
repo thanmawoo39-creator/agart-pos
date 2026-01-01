@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt, UserCog, ClipboardList } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt, UserCog, ClipboardList, Wallet } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -31,6 +31,7 @@ const navItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
+  { title: "Expenses", url: "/expenses", icon: Wallet, roles: ["owner"] },
   { title: "Staff", url: "/staff", icon: UserCog, roles: ["owner"] },
   { title: "Attendance", url: "/attendance", icon: ClipboardList, roles: ["owner"] },
 ];

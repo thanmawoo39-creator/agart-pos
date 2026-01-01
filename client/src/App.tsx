@@ -22,6 +22,7 @@ import Ledger from "@/pages/ledger";
 import CustomerProfile from "@/pages/customer-profile";
 import Staff from "@/pages/staff";
 import Attendance from "@/pages/attendance";
+import Expenses from "@/pages/expenses";
 
 function Router() {
   return (
@@ -36,6 +37,7 @@ function Router() {
       <Route path="/reports" component={Reports} />
       <Route path="/staff" component={Staff} />
       <Route path="/attendance" component={Attendance} />
+      <Route path="/expenses" component={Expenses} />
       <Route component={NotFound} />
     </Switch>
   );
