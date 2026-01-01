@@ -684,7 +684,11 @@ export async function registerRoutes(
 
   app.patch("/api/expenses/:id", async (req, res) => {
     try {
-      const expense = await storage.updateExpense(req.params.id, req.body);
+      const parsed = expenseSchema.omit({ id: true }).partial().safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid expense data", details: parsed.error.errors });
+      }
+      const expense = await storage.updateExpense(req.params.id, parsed.data);
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
       }

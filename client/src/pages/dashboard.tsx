@@ -57,6 +57,11 @@ interface AIInsights {
 }
 
 export default function Dashboard() {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const pnlStartDate = startOfMonth.toISOString().split("T")[0];
+  const pnlEndDate = now.toISOString().split("T")[0];
+
   const { data: summary, isLoading } = useQuery<DashboardSummary>({
     queryKey: ["/api/dashboard/summary"],
   });
@@ -65,8 +70,9 @@ export default function Dashboard() {
     queryKey: ["/api/ai/insights"],
   });
 
+  const pnlUrl = `/api/reports/pnl?startDate=${pnlStartDate}&endDate=${pnlEndDate}`;
   const { data: pnlReport, isLoading: pnlLoading } = useQuery<ProfitLossReport>({
-    queryKey: ["/api/reports/pnl"],
+    queryKey: [pnlUrl],
   });
 
   const formatCurrency = (amount: number) => {

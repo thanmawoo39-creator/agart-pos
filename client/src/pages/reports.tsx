@@ -38,13 +38,17 @@ type SortField = "timestamp" | "total" | "paymentMethod";
 type SortDirection = "asc" | "desc";
 type RiskSortField = "customerName" | "currentBalance" | "creditUtilization" | "riskLevel";
 
-const categoryColors: Record<ExpenseCategory, string> = {
+const categoryColors: Record<string, string> = {
   Rent: "text-blue-600 dark:text-blue-400",
   Electricity: "text-yellow-600 dark:text-yellow-400",
   Fuel: "text-orange-600 dark:text-orange-400",
   Internet: "text-purple-600 dark:text-purple-400",
   Taxes: "text-red-600 dark:text-red-400",
   Other: "text-slate-600 dark:text-slate-400",
+};
+
+const getCategoryColor = (category: string): string => {
+  return categoryColors[category] || "text-slate-600 dark:text-slate-400";
 };
 
 export default function Reports() {
@@ -69,8 +73,9 @@ export default function Reports() {
     queryKey: ["/api/ai/risk-analysis"],
   });
 
+  const pnlUrl = `/api/reports/pnl?startDate=${pnlStartDate}&endDate=${pnlEndDate}`;
   const { data: pnlReport, isLoading: pnlLoading } = useQuery<ProfitLossReport>({
-    queryKey: ["/api/reports/pnl", pnlStartDate, pnlEndDate],
+    queryKey: [pnlUrl],
   });
 
   const formatCurrency = (amount: number) => {
@@ -262,7 +267,7 @@ export default function Reports() {
                     .sort(([, a], [, b]) => b - a)
                     .map(([category, amount]) => (
                       <div key={category} className="flex justify-between items-center py-1.5">
-                        <span className={`text-sm ${categoryColors[category as ExpenseCategory]}`}>{category}</span>
+                        <span className={`text-sm ${getCategoryColor(category)}`}>{category}</span>
                         <span className="text-sm font-medium">{formatCurrency(amount)}</span>
                       </div>
                     ))}

@@ -78,10 +78,12 @@ export default function Expenses() {
 
   const { data: expenses = [], isLoading } = useQuery<Expense[]>({
     queryKey: ["/api/expenses"],
+    enabled: canManageExpenses,
   });
 
   const { data: insights } = useQuery<ExpenseInsightData>({
     queryKey: ["/api/ai/expense-insights"],
+    enabled: canManageExpenses,
   });
 
   const createMutation = useMutation({
