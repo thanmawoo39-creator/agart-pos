@@ -44,6 +44,8 @@ export interface IStorage {
   createStaff(staff: InsertStaff): Promise<Staff>;
   updateStaff(id: string, updates: Partial<InsertStaff>): Promise<Staff | undefined>;
   deleteStaff(id: string): Promise<boolean>;
+  suspendStaff(id: string): Promise<Staff | undefined>;
+  activateStaff(id: string): Promise<Staff | undefined>;
 
   // Dashboard
   getDashboardSummary(): Promise<DashboardSummary>;
@@ -140,6 +142,14 @@ export class POSStorage implements IStorage {
 
   async deleteStaff(id: string): Promise<boolean> {
     return db.deleteStaff(id);
+  }
+
+  async suspendStaff(id: string): Promise<Staff | undefined> {
+    return db.suspendStaff(id);
+  }
+
+  async activateStaff(id: string): Promise<Staff | undefined> {
+    return db.activateStaff(id);
   }
 
   // Dashboard

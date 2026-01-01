@@ -177,12 +177,30 @@ export async function getStaffMember(id: string): Promise<Staff | undefined> {
 
 export async function getStaffByPin(pin: string): Promise<Staff | undefined> {
   const staff = await getStaff();
-  return staff.find((s) => s.pin === pin && s.active);
+  return staff.find((s) => s.pin === pin && s.status === "active");
 }
 
 export async function getStaffByBarcode(barcode: string): Promise<Staff | undefined> {
   const staff = await getStaff();
-  return staff.find((s) => s.barcode === barcode && s.active);
+  return staff.find((s) => s.barcode === barcode && s.status === "active");
+}
+
+export async function suspendStaff(id: string): Promise<Staff | undefined> {
+  const staff = await getStaff();
+  const index = staff.findIndex((s) => s.id === id);
+  if (index === -1) return undefined;
+  staff[index] = { ...staff[index], status: "suspended" };
+  await setCollection(KEYS.STAFF, staff);
+  return staff[index];
+}
+
+export async function activateStaff(id: string): Promise<Staff | undefined> {
+  const staff = await getStaff();
+  const index = staff.findIndex((s) => s.id === id);
+  if (index === -1) return undefined;
+  staff[index] = { ...staff[index], status: "active" };
+  await setCollection(KEYS.STAFF, staff);
+  return staff[index];
 }
 
 export async function createStaff(staffMember: InsertStaff): Promise<Staff> {
@@ -232,7 +250,7 @@ export async function initializeMockData(): Promise<void> {
   const products = await getProducts();
   
   // If already initialized with valid data, skip
-  if (initialized === "v6" && products.length > 0) return;
+  if (initialized === "v7" && products.length > 0) return;
   
   // Clear any existing data and reinitialize
   await clearAllData();
@@ -330,7 +348,7 @@ export async function initializeMockData(): Promise<void> {
     pin: "1234",
     role: "owner",
     barcode: "STAFF001",
-    active: true,
+    status: "active",
   });
 
   await createStaff({
@@ -338,7 +356,7 @@ export async function initializeMockData(): Promise<void> {
     pin: "2345",
     role: "manager",
     barcode: "STAFF002",
-    active: true,
+    status: "active",
   });
 
   await createStaff({
@@ -346,10 +364,10 @@ export async function initializeMockData(): Promise<void> {
     pin: "3456",
     role: "cashier",
     barcode: "STAFF003",
-    active: true,
+    status: "active",
   });
 
-  await db.set(KEYS.INITIALIZED, "v6");
+  await db.set(KEYS.INITIALIZED, "v7");
 }
 
 export default db;

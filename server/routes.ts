@@ -391,6 +391,34 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/staff/:id/suspend", async (req, res) => {
+    try {
+      const staffMember = await storage.suspendStaff(req.params.id);
+      if (!staffMember) {
+        return res.status(404).json({ error: "Staff member not found" });
+      }
+      const { pin, ...safeStaff } = staffMember;
+      res.json(safeStaff);
+    } catch (error) {
+      console.error("Error suspending staff member:", error);
+      res.status(500).json({ error: "Failed to suspend staff member" });
+    }
+  });
+
+  app.post("/api/staff/:id/activate", async (req, res) => {
+    try {
+      const staffMember = await storage.activateStaff(req.params.id);
+      if (!staffMember) {
+        return res.status(404).json({ error: "Staff member not found" });
+      }
+      const { pin, ...safeStaff } = staffMember;
+      res.json(safeStaff);
+    } catch (error) {
+      console.error("Error activating staff member:", error);
+      res.status(500).json({ error: "Failed to activate staff member" });
+    }
+  });
+
   // Staff Authentication
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -407,8 +435,8 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
-      if (!staffMember.active) {
-        return res.status(401).json({ error: "Staff account is inactive" });
+      if (staffMember.status === "suspended") {
+        return res.status(401).json({ error: "Staff account is suspended" });
       }
 
       // Return staff info without PIN

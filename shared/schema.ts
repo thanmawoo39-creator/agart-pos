@@ -79,13 +79,16 @@ export type InsertCreditLedger = Omit<CreditLedger, "id">;
 export const staffRoleSchema = z.enum(["owner", "manager", "cashier"]);
 export type StaffRole = z.infer<typeof staffRoleSchema>;
 
+export const staffStatusSchema = z.enum(["active", "suspended"]);
+export type StaffStatus = z.infer<typeof staffStatusSchema>;
+
 export const staffSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   pin: z.string().length(4),
   role: staffRoleSchema,
   barcode: z.string().optional(),
-  active: z.boolean().default(true),
+  status: staffStatusSchema.default("active"),
 });
 
 export type Staff = z.infer<typeof staffSchema>;
