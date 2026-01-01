@@ -8,6 +8,7 @@ import type {
   Attendance,
   CurrentShift,
   InventoryLog,
+  Expense,
   InsertProduct,
   InsertCustomer,
   InsertSale,
@@ -15,6 +16,7 @@ import type {
   InsertStaff,
   InsertAttendance,
   InsertInventoryLog,
+  InsertExpense,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -29,6 +31,7 @@ const KEYS = {
   STAFF: "staff",
   ATTENDANCE: "attendance",
   INVENTORY_LOG: "inventoryLog",
+  EXPENSES: "expenses",
   INITIALIZED: "initialized",
 };
 
@@ -332,6 +335,7 @@ export async function clearAllData(): Promise<void> {
   await db.delete(KEYS.STAFF);
   await db.delete(KEYS.ATTENDANCE);
   await db.delete(KEYS.INVENTORY_LOG);
+  await db.delete(KEYS.EXPENSES);
   await db.delete(KEYS.INITIALIZED);
 }
 
@@ -524,6 +528,54 @@ export async function adjustStock(
   });
 
   return { product: updatedProduct, log };
+}
+
+// Expenses CRUD
+export async function getExpenses(): Promise<Expense[]> {
+  return getCollection<Expense>(KEYS.EXPENSES);
+}
+
+export async function getExpense(id: string): Promise<Expense | undefined> {
+  const expenses = await getExpenses();
+  return expenses.find((e) => e.id === id);
+}
+
+export async function createExpense(expense: InsertExpense): Promise<Expense> {
+  const expenses = await getExpenses();
+  const newExpense: Expense = { ...expense, id: randomUUID() };
+  expenses.push(newExpense);
+  await setCollection(KEYS.EXPENSES, expenses);
+  return newExpense;
+}
+
+export async function updateExpense(
+  id: string,
+  updates: Partial<InsertExpense>
+): Promise<Expense | undefined> {
+  const expenses = await getExpenses();
+  const index = expenses.findIndex((e) => e.id === id);
+  if (index === -1) return undefined;
+  expenses[index] = { ...expenses[index], ...updates };
+  await setCollection(KEYS.EXPENSES, expenses);
+  return expenses[index];
+}
+
+export async function deleteExpense(id: string): Promise<boolean> {
+  const expenses = await getExpenses();
+  const filtered = expenses.filter((e) => e.id !== id);
+  if (filtered.length === expenses.length) return false;
+  await setCollection(KEYS.EXPENSES, filtered);
+  return true;
+}
+
+export async function getExpensesByDateRange(startDate: string, endDate: string): Promise<Expense[]> {
+  const expenses = await getExpenses();
+  return expenses.filter((e) => e.date >= startDate && e.date <= endDate);
+}
+
+export async function getExpensesByCategory(category: string): Promise<Expense[]> {
+  const expenses = await getExpenses();
+  return expenses.filter((e) => e.category === category);
 }
 
 export default db;

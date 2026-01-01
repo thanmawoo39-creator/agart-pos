@@ -4,7 +4,7 @@
  */
 
 import { storage } from "../storage";
-import type { Customer, CreditLedger, Product, Sale } from "@shared/schema";
+import type { Customer, CreditLedger, Product, Sale, Expense, ExpenseCategory, ProfitLossReport } from "@shared/schema";
 
 // Risk analysis result type
 export interface RiskAnalysis {
@@ -328,4 +328,236 @@ export async function getAllCustomerRiskAnalysis(): Promise<RiskAnalysis[]> {
   );
 
   return analyses.filter((a): a is RiskAnalysis => a !== null);
+}
+
+// Expense Insights type
+export interface ExpenseInsight {
+  type: "warning" | "info" | "success";
+  message: string;
+  category?: ExpenseCategory;
+}
+
+export interface ExpenseInsights {
+  totalExpensesThisMonth: number;
+  totalExpensesLastMonth: number;
+  expensesByCategory: Record<ExpenseCategory, number>;
+  insights: ExpenseInsight[];
+  estimatedNetProfit: number;
+  expenseToSalesRatio: number;
+}
+
+/**
+ * Calculate Profit & Loss Report
+ */
+export async function getProfitLossReport(
+  startDate?: string,
+  endDate?: string
+): Promise<ProfitLossReport> {
+  const now = new Date();
+  const defaultStartDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+  const defaultEndDate = now.toISOString().split("T")[0];
+  
+  const start = startDate || defaultStartDate;
+  const end = endDate || defaultEndDate;
+  
+  const [sales, expenses, products] = await Promise.all([
+    storage.getSales(),
+    storage.getExpensesByDateRange(start, end),
+    storage.getProducts(),
+  ]);
+
+  // Filter sales by date range
+  const filteredSales = sales.filter((s) => {
+    const saleDate = new Date(s.timestamp).toISOString().split("T")[0];
+    return saleDate >= start && saleDate <= end;
+  });
+
+  // Calculate revenue
+  const revenue = filteredSales.reduce((sum, sale) => sum + sale.total, 0);
+
+  // Calculate Cost of Goods Sold (COGS)
+  let costOfGoodsSold = 0;
+  const productMap = new Map(products.map((p) => [p.id, p]));
+  
+  filteredSales.forEach((sale) => {
+    sale.items.forEach((item) => {
+      const product = productMap.get(item.productId);
+      if (product?.cost) {
+        costOfGoodsSold += product.cost * item.quantity;
+      }
+    });
+  });
+
+  // Calculate gross profit
+  const grossProfit = revenue - costOfGoodsSold;
+
+  // Calculate expenses by category
+  const expensesByCategory: Record<ExpenseCategory, number> = {
+    Rent: 0,
+    Electricity: 0,
+    Fuel: 0,
+    Internet: 0,
+    Taxes: 0,
+    Other: 0,
+  };
+
+  expenses.forEach((expense) => {
+    expensesByCategory[expense.category] += expense.amount;
+  });
+
+  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const taxExpenses = expensesByCategory.Taxes;
+  
+  // Net Profit = Gross Profit - Total Expenses (taxes already included in expenses)
+  const netProfit = grossProfit - totalExpenses;
+  const netProfitMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
+
+  return {
+    period: `${start} to ${end}`,
+    revenue,
+    costOfGoodsSold,
+    grossProfit,
+    totalExpenses,
+    expensesByCategory,
+    taxExpenses,
+    netProfit,
+    netProfitMargin,
+  };
+}
+
+/**
+ * Get AI CFO Expense Insights
+ */
+export async function getExpenseInsights(): Promise<ExpenseInsights> {
+  const now = new Date();
+  
+  // Current month range
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+  const currentMonthEnd = now.toISOString().split("T")[0];
+  
+  // Last month range
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split("T")[0];
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split("T")[0];
+
+  const [currentExpenses, lastExpenses, sales] = await Promise.all([
+    storage.getExpensesByDateRange(currentMonthStart, currentMonthEnd),
+    storage.getExpensesByDateRange(lastMonthStart, lastMonthEnd),
+    storage.getSales(),
+  ]);
+
+  // Calculate totals
+  const totalExpensesThisMonth = currentExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalExpensesLastMonth = lastExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+  // Expenses by category for this month
+  const expensesByCategory: Record<ExpenseCategory, number> = {
+    Rent: 0,
+    Electricity: 0,
+    Fuel: 0,
+    Internet: 0,
+    Taxes: 0,
+    Other: 0,
+  };
+
+  currentExpenses.forEach((expense) => {
+    expensesByCategory[expense.category] += expense.amount;
+  });
+
+  // Last month expenses by category for comparison
+  const lastMonthByCategory: Record<ExpenseCategory, number> = {
+    Rent: 0,
+    Electricity: 0,
+    Fuel: 0,
+    Internet: 0,
+    Taxes: 0,
+    Other: 0,
+  };
+
+  lastExpenses.forEach((expense) => {
+    lastMonthByCategory[expense.category] += expense.amount;
+  });
+
+  // Calculate current month sales
+  const currentMonthSales = sales.filter((s) => {
+    const saleDate = new Date(s.timestamp).toISOString().split("T")[0];
+    return saleDate >= currentMonthStart && saleDate <= currentMonthEnd;
+  });
+
+  const totalSalesThisMonth = currentMonthSales.reduce((sum, s) => sum + s.total, 0);
+
+  // Calculate expense to sales ratio
+  const expenseToSalesRatio = totalSalesThisMonth > 0 
+    ? (totalExpensesThisMonth / totalSalesThisMonth) * 100 
+    : 0;
+
+  // Get P&L for estimated net profit
+  const pnl = await getProfitLossReport(currentMonthStart, currentMonthEnd);
+  const estimatedNetProfit = pnl.netProfit;
+
+  // Generate AI insights
+  const insights: ExpenseInsight[] = [];
+
+  // Check for expense increases by category
+  const categories: ExpenseCategory[] = ["Rent", "Electricity", "Fuel", "Internet", "Taxes", "Other"];
+  categories.forEach((category) => {
+    const current = expensesByCategory[category];
+    const last = lastMonthByCategory[category];
+    
+    if (last > 0 && current > last) {
+      const increasePercent = ((current - last) / last) * 100;
+      if (increasePercent >= 20) {
+        insights.push({
+          type: "warning",
+          message: `Your ${category} expense increased by ${increasePercent.toFixed(0)}% this month. Review for potential savings.`,
+          category,
+        });
+      }
+    }
+  });
+
+  // Check expense to gross profit ratio
+  if (pnl.grossProfit > 0) {
+    const expenseToGrossRatio = (totalExpensesThisMonth / pnl.grossProfit) * 100;
+    if (expenseToGrossRatio >= 60) {
+      insights.push({
+        type: "warning",
+        message: `High Expense Alert: Operating costs are consuming ${expenseToGrossRatio.toFixed(0)}% of your gross profit.`,
+      });
+    }
+  }
+
+  // Check net profit margin
+  if (pnl.netProfitMargin >= 20) {
+    insights.push({
+      type: "success",
+      message: `Healthy: Net profit margin is ${pnl.netProfitMargin.toFixed(1)}%, above the 20% target.`,
+    });
+  } else if (pnl.netProfitMargin > 0) {
+    insights.push({
+      type: "info",
+      message: `Net profit margin is ${pnl.netProfitMargin.toFixed(1)}%. Consider reducing expenses to reach the 20% target.`,
+    });
+  } else if (pnl.netProfitMargin < 0) {
+    insights.push({
+      type: "warning",
+      message: `Operating at a loss. Net profit margin is ${pnl.netProfitMargin.toFixed(1)}%. Urgent action needed.`,
+    });
+  }
+
+  // If no specific insights, add general message
+  if (insights.length === 0) {
+    insights.push({
+      type: "success",
+      message: "All expense metrics look healthy. Keep up the good work!",
+    });
+  }
+
+  return {
+    totalExpensesThisMonth,
+    totalExpensesLastMonth,
+    expensesByCategory,
+    insights,
+    estimatedNetProfit,
+    expenseToSalesRatio,
+  };
 }

@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
 import { storage } from "./storage";
-import { productSchema, customerSchema, saleSchema, creditLedgerSchema, staffSchema } from "@shared/schema";
-import { getAIInsights, getAllCustomerRiskAnalysis, analyzeCustomerRisk } from "./lib/ai-engine";
+import { productSchema, customerSchema, saleSchema, creditLedgerSchema, staffSchema, expenseSchema } from "@shared/schema";
+import { getAIInsights, getAllCustomerRiskAnalysis, analyzeCustomerRisk, getProfitLossReport, getExpenseInsights } from "./lib/ai-engine";
 import { findProductByBarcode, findCustomerByBarcode, getCustomerLedger, addCustomerPayment, processSale, POSError } from "./lib/pos-engine";
 
 // Validation schemas for attendance
@@ -631,6 +631,106 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error during login:", error);
       res.status(500).json({ error: "Failed to authenticate" });
+    }
+  });
+
+  // Expenses Management
+  app.get("/api/expenses", async (req, res) => {
+    try {
+      const { startDate, endDate, category } = req.query;
+      let expenses;
+      
+      if (startDate && endDate) {
+        expenses = await storage.getExpensesByDateRange(startDate as string, endDate as string);
+      } else if (category) {
+        expenses = await storage.getExpensesByCategory(category as string);
+      } else {
+        expenses = await storage.getExpenses();
+      }
+      
+      res.json(expenses);
+    } catch (error) {
+      console.error("Error fetching expenses:", error);
+      res.status(500).json({ error: "Failed to fetch expenses" });
+    }
+  });
+
+  app.get("/api/expenses/:id", async (req, res) => {
+    try {
+      const expense = await storage.getExpense(req.params.id);
+      if (!expense) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+      res.json(expense);
+    } catch (error) {
+      console.error("Error fetching expense:", error);
+      res.status(500).json({ error: "Failed to fetch expense" });
+    }
+  });
+
+  app.post("/api/expenses", async (req, res) => {
+    try {
+      const parsed = expenseSchema.omit({ id: true }).safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid expense data", details: parsed.error.errors });
+      }
+      const expense = await storage.createExpense(parsed.data);
+      res.status(201).json(expense);
+    } catch (error) {
+      console.error("Error creating expense:", error);
+      res.status(500).json({ error: "Failed to create expense" });
+    }
+  });
+
+  app.patch("/api/expenses/:id", async (req, res) => {
+    try {
+      const expense = await storage.updateExpense(req.params.id, req.body);
+      if (!expense) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+      res.json(expense);
+    } catch (error) {
+      console.error("Error updating expense:", error);
+      res.status(500).json({ error: "Failed to update expense" });
+    }
+  });
+
+  app.delete("/api/expenses/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteExpense(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting expense:", error);
+      res.status(500).json({ error: "Failed to delete expense" });
+    }
+  });
+
+  // Profit & Loss Report
+  app.get("/api/reports/pnl", async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      const report = await getProfitLossReport(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+      res.json(report);
+    } catch (error) {
+      console.error("Error fetching P&L report:", error);
+      res.status(500).json({ error: "Failed to fetch P&L report" });
+    }
+  });
+
+  // Expense insights for AI CFO
+  app.get("/api/ai/expense-insights", async (req, res) => {
+    try {
+      const insights = await getExpenseInsights();
+      res.json(insights);
+    } catch (error) {
+      console.error("Error fetching expense insights:", error);
+      res.status(500).json({ error: "Failed to fetch expense insights" });
     }
   });
 

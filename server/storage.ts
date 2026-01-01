@@ -7,6 +7,7 @@ import type {
   Attendance,
   CurrentShift,
   InventoryLog,
+  Expense,
   InsertProduct,
   InsertCustomer,
   InsertSale,
@@ -14,6 +15,7 @@ import type {
   InsertStaff,
   InsertAttendance,
   InsertInventoryLog,
+  InsertExpense,
   DashboardSummary,
 } from "@shared/schema";
 import * as db from "./lib/db";
@@ -73,6 +75,15 @@ export interface IStorage {
     staffName?: string,
     reason?: string
   ): Promise<{ product: Product; log: InventoryLog } | undefined>;
+
+  // Expenses
+  getExpenses(): Promise<Expense[]>;
+  getExpense(id: string): Promise<Expense | undefined>;
+  createExpense(expense: InsertExpense): Promise<Expense>;
+  updateExpense(id: string, updates: Partial<InsertExpense>): Promise<Expense | undefined>;
+  deleteExpense(id: string): Promise<boolean>;
+  getExpensesByDateRange(startDate: string, endDate: string): Promise<Expense[]>;
+  getExpensesByCategory(category: string): Promise<Expense[]>;
 
   // Dashboard
   getDashboardSummary(): Promise<DashboardSummary>;
@@ -230,6 +241,35 @@ export class POSStorage implements IStorage {
     reason?: string
   ): Promise<{ product: Product; log: InventoryLog } | undefined> {
     return db.adjustStock(productId, quantityChange, type, staffId, staffName, reason);
+  }
+
+  // Expenses
+  async getExpenses(): Promise<Expense[]> {
+    return db.getExpenses();
+  }
+
+  async getExpense(id: string): Promise<Expense | undefined> {
+    return db.getExpense(id);
+  }
+
+  async createExpense(expense: InsertExpense): Promise<Expense> {
+    return db.createExpense(expense);
+  }
+
+  async updateExpense(id: string, updates: Partial<InsertExpense>): Promise<Expense | undefined> {
+    return db.updateExpense(id, updates);
+  }
+
+  async deleteExpense(id: string): Promise<boolean> {
+    return db.deleteExpense(id);
+  }
+
+  async getExpensesByDateRange(startDate: string, endDate: string): Promise<Expense[]> {
+    return db.getExpensesByDateRange(startDate, endDate);
+  }
+
+  async getExpensesByCategory(category: string): Promise<Expense[]> {
+    return db.getExpensesByCategory(category);
   }
 
   // Dashboard
