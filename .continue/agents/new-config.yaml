@@ -1,0 +1,15 @@
+name: Local Config
+version: 1.0.0
+schema: v1
+models:
+  - title: Groq (Llama 3)
+    provider: openai
+    model: llama3-70b-8192
+    apiKey: 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
+    apiBase: https://api.groq.com/openai/v1
+  - uses: google/gemini-2.5-pro
+    with:
+      GEMINI_API_KEY: AIzaSyANLmRwuIQVHWRST1rWpfZCYUUdqSctjKc
+  - uses: google/gemini-2.0-flash
+    with:
+      GEMINI_API_KEY: AIzaSyANLmRwuIQVHWRST1rWpfZCYUUdqSctjKc

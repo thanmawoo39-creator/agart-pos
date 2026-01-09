@@ -10,9 +10,10 @@ interface LoginModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
+  required?: boolean; // Prevent closing if authentication is required
 }
 
-export function LoginModal({ open, onOpenChange, onSuccess }: LoginModalProps) {
+export function LoginModal({ open, onOpenChange, onSuccess, required = false }: LoginModalProps) {
   const { login, isLoggedIn, currentStaff, logout } = useAuth();
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -20,6 +21,15 @@ export function LoginModal({ open, onOpenChange, onSuccess }: LoginModalProps) {
   const [barcodeBuffer, setBarcodeBuffer] = useState("");
   const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Prevent closing modal if authentication is required
+  const handleOpenChange = (newOpen: boolean) => {
+    if (required && !isLoggedIn && !newOpen) {
+      // Don't allow closing if authentication is required and user is not logged in
+      return;
+    }
+    onOpenChange(newOpen);
+  };
 
   useEffect(() => {
     if (open && inputRef.current) {
@@ -107,8 +117,16 @@ export function LoginModal({ open, onOpenChange, onSuccess }: LoginModalProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[400px]">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-[400px]" onEscapeKeyDown={(e) => {
+        if (required && !isLoggedIn) {
+          e.preventDefault(); // Prevent closing on Escape if required
+        }
+      }} onPointerDownOutside={(e) => {
+        if (required && !isLoggedIn) {
+          e.preventDefault(); // Prevent closing on outside click if required
+        }
+      }}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />

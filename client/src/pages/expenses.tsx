@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
-import { Plus, Trash2, Edit2, Lock, DollarSign, TrendingUp, Lightbulb, Calendar, Filter } from "lucide-react";
+import { Plus, Trash2, Edit2, Lock, DollarSign, TrendingUp, Lightbulb, Calendar, Filter, Camera, X, Upload, Eye } from "lucide-react";
 import type { Expense, ExpenseCategory } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -70,8 +70,19 @@ export default function Expenses() {
     category: "Other" as ExpenseCategory,
     amount: "",
     date: format(new Date(), "yyyy-MM-dd"),
+    description: "",
     note: "",
   });
+  const receiptFileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [receiptImage, setReceiptImage] = useState<string | null>(null); // Base64 image data
+  const [receiptFileName, setReceiptFileName] = useState<string | null>(null);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const cameraPreviewTimeoutRef = useRef<number | null>(null);
 
   const isLoggedIn = !!session;
   const canManageExpenses = isOwner;
@@ -87,16 +98,16 @@ export default function Expenses() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: { category: ExpenseCategory; amount: number; date: string; note?: string; staffId?: string; staffName?: string }) =>
-      apiRequest("POST", "/api/expenses", {
+    mutationFn: async (data: { category: ExpenseCategory; amount: number; date: string; description?: string; note?: string; receiptImageUrl?: string }) => {
+      const res = await apiRequest("POST", "/api/expenses", {
         ...data,
-        timestamp: new Date().toISOString(),
-      }),
+      });
+      return (await res.json()) as Expense;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
       queryClient.invalidateQueries({ queryKey: ["/api/ai/expense-insights"] });
       toast({ title: "Expense added successfully" });
-      closeAddModal();
     },
     onError: (error: any) => {
       toast({
@@ -143,13 +154,156 @@ export default function Expenses() {
     },
   });
 
+  const analyzeReceiptMutation = useMutation({
+    mutationFn: async (imageData: string) => {
+      const base64 = imageData.split(',')[1];
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/jpeg' });
+
+      const formData = new FormData();
+      formData.append('image', blob, `receipt-${Date.now()}.jpg`);
+
+      const res = await fetch('/api/ai/analyze-expense', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        // Try to get error response, handle both JSON and HTML
+        const contentType = res.headers.get('content-type');
+        let errorData;
+        
+        if (contentType && contentType.includes('application/json')) {
+          errorData = await res.json().catch(() => ({ message: 'An unknown error occurred' }));
+        } else {
+          // If HTML error page, create a more helpful error
+          const text = await res.text().catch(() => 'Server returned an error');
+          errorData = { 
+            error: 'Server returned an HTML error page instead of JSON',
+            details: text.substring(0, 200) // Truncate long HTML responses
+          };
+        }
+        
+        throw new Error(errorData.error || errorData.message || 'Failed to analyze receipt');
+      }
+
+      const responseText = await res.text();
+      let analysisResult;
+      
+      try {
+        analysisResult = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Failed to parse AI response:', parseError);
+        console.error('Response text:', responseText);
+        throw new Error('Invalid response format from server');
+      }
+    },
+  });
+
   const resetForm = () => {
     setFormData({
       category: "Other",
       amount: "",
       date: format(new Date(), "yyyy-MM-dd"),
+      description: "",
       note: "",
     });
+    setReceiptImage(null);
+    setReceiptFileName(null);
+    if (receiptFileInputRef.current) {
+      receiptFileInputRef.current.value = "";
+    }
+  };
+
+  const handleReceiptFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      const file = event.target.files[0];
+      setReceiptFileName(file.name);
+      
+      // Convert file to Base64 for preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result as string;
+        setReceiptImage(base64String);
+
+        toast({
+          title: "Receipt Uploaded",
+          description: "You can now fill in the expense details manually or try AI analysis.",
+        });
+      };
+      reader.onerror = () => {
+        toast({
+          title: "Error reading image",
+          description: "Failed to read the selected image file.",
+          variant: "destructive",
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveReceipt = () => {
+    setReceiptImage(null);
+    setReceiptFileName(null);
+    if (receiptFileInputRef.current) {
+      receiptFileInputRef.current.value = "";
+    }
+  };
+
+  const uploadReceiptImage = async (): Promise<string | null> => {
+    if (!receiptImage) return null;
+
+    try {
+      setIsUploadingReceipt(true);
+      console.log('Starting receipt image upload...');
+      
+      // Convert base64 to blob
+      const response = await fetch(receiptImage);
+      const blob = await response.blob();
+      
+      // Create FormData
+      const formData = new FormData();
+      formData.append('image', blob, receiptFileName || 'receipt.jpg');
+      
+      // Upload to server
+      const uploadResponse = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      console.log('Upload response status:', uploadResponse.status);
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('Upload failed:', errorText);
+        throw new Error(`Failed to upload receipt image: ${errorText}`);
+      }
+
+      const uploadData = await uploadResponse.json();
+      console.log('Upload successful:', uploadData);
+      
+      // Return the full URL
+      const fullUrl = uploadData.url.startsWith('http') 
+        ? uploadData.url 
+        : `${window.location.origin}${uploadData.url}`;
+      
+      return fullUrl;
+    } catch (error) {
+      console.error('Error uploading receipt:', error);
+      toast({
+        title: "Failed to upload receipt",
+        description: error instanceof Error ? error.message : "An error occurred while uploading the receipt.",
+        variant: "destructive",
+      });
+      return null;
+    } finally {
+      setIsUploadingReceipt(false);
+    }
   };
 
   const closeAddModal = () => {
@@ -169,25 +323,71 @@ export default function Expenses() {
       category: expense.category,
       amount: expense.amount.toString(),
       date: expense.date,
+      description: expense.description || "",
       note: expense.note || "",
     });
     setEditModalOpen(true);
   };
 
-  const handleSubmitAdd = () => {
+  const handleSubmitAdd = async () => {
     if (!formData.amount || parseFloat(formData.amount) <= 0) {
       toast({ title: "Please enter a valid amount", variant: "destructive" });
       return;
     }
 
-    createMutation.mutate({
-      category: formData.category,
-      amount: parseFloat(formData.amount),
-      date: formData.date,
-      note: formData.note || undefined,
-      staffId: session?.staff.id,
-      staffName: session?.staff.name,
-    });
+    const imageForAi = receiptImage;
+
+    let receiptImageUrl: string | undefined = undefined;
+    if (receiptImage) {
+      const uploaded = await uploadReceiptImage();
+      if (!uploaded) {
+        return;
+      }
+      receiptImageUrl = uploaded;
+    }
+
+    let created: Expense;
+    try {
+      created = await createMutation.mutateAsync({
+        category: formData.category,
+        amount: parseFloat(formData.amount),
+        date: formData.date,
+        description: formData.description || undefined,
+        note: formData.note || undefined,
+        receiptImageUrl,
+      });
+    } catch {
+      return;
+    }
+
+    closeAddModal();
+
+    if (imageForAi) {
+      void analyzeReceiptMutation
+        .mutateAsync(imageForAi)
+        .then((analysis: any) => {
+          const suggestedCategory = analysis?.category ?? null;
+          const suggestedAmount = typeof analysis?.estimatedAmount === 'number' ? analysis.estimatedAmount : null;
+          const summary = analysis?.summary ?? null;
+
+          if (!suggestedCategory && !suggestedAmount && !summary) {
+            return;
+          }
+
+          toast({
+            title: "AI Suggestions Available",
+            description: `Saved expense ${created.id}. Category: ${suggestedCategory ?? '-'}, Amount: ${suggestedAmount ?? '-'}${summary ? `, Summary: ${summary}` : ''}`,
+          });
+        })
+        .catch((err: any) => {
+          console.error('AI Analysis failed:', err);
+          toast({
+            title: "AI Analysis Unavailable",
+            description: "Expense was saved. You can keep entering expenses manually; the receipt is preserved.",
+            variant: "default",
+          });
+        });
+    }
   };
 
   const handleSubmitEdit = () => {
@@ -215,6 +415,226 @@ export default function Expenses() {
   }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const totalFiltered = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+  const applyAiSuggestionsToForm = (analysis: any) => {
+    const suggestedCategory = analysis?.category as ExpenseCategory | undefined;
+    const suggestedAmount = typeof analysis?.estimatedAmount === 'number' ? analysis.estimatedAmount : undefined;
+    const suggestedSummary = typeof analysis?.summary === 'string' ? analysis.summary : undefined;
+
+    setFormData((prev) => {
+      const next = { ...prev };
+
+      if (suggestedCategory && prev.category === "Other") {
+        next.category = suggestedCategory;
+      }
+
+      if (typeof suggestedAmount === 'number' && (!prev.amount || Number(prev.amount) <= 0)) {
+        next.amount = String(suggestedAmount);
+      }
+
+      if (suggestedSummary && !prev.note) {
+        next.note = `AI Summary: ${suggestedSummary}`;
+      }
+
+      return next;
+    });
+  };
+
+  const handleTakePhotoClick = async () => {
+    console.log('Camera: Starting camera initialization');
+    
+    // Check if mediaDevices is supported
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.error('Camera: mediaDevices not supported', {
+        mediaDevices: !!navigator.mediaDevices,
+        getUserMedia: !!navigator.mediaDevices?.getUserMedia
+      });
+      setCameraError("Camera access is not supported by your browser. Please use a modern browser like Chrome, Firefox, or Safari.");
+      setIsCameraOpen(true);
+      return;
+    }
+
+    // Check for secure context
+    if (!window.isSecureContext) {
+      console.error('Camera: Not in secure context', {
+        protocol: window.location.protocol,
+        hostname: window.location.hostname,
+        isSecure: window.isSecureContext
+      });
+      setCameraError("Camera access requires a secure connection (HTTPS). The app is currently running on an insecure connection. Please upload an image from your gallery instead.");
+      setIsCameraOpen(true);
+      return;
+    }
+
+    console.log('Camera: Secure context confirmed, requesting camera access');
+
+    try {
+      // Try to get camera access with environment (rear) camera first
+      const constraints = { 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      };
+      
+      console.log('Camera: Requesting with constraints:', constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      console.log('Camera: Stream obtained successfully', {
+        active: stream.active,
+        tracks: stream.getTracks().length
+      });
+      
+      setCameraStream(stream);
+      
+      // Set video source after a small delay to ensure the stream is ready
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(err => {
+            console.error('Camera: Video play failed:', err);
+            setCameraError("Failed to start camera preview. Please try uploading from gallery.");
+          });
+          console.log('Camera: Video source set');
+        }
+      }, 100);
+
+      // Watchdog: if preview stays black/doesn't start, show fallback
+      if (cameraPreviewTimeoutRef.current) {
+        window.clearTimeout(cameraPreviewTimeoutRef.current);
+      }
+      cameraPreviewTimeoutRef.current = window.setTimeout(() => {
+        const v = videoRef.current;
+        const hasFrames = !!v && v.videoWidth > 0 && v.videoHeight > 0;
+        const canPlay = !!v && v.readyState >= 2;
+
+        if (!hasFrames || !canPlay) {
+          console.warn('Camera: Preview watchdog triggered - switching to upload fallback', {
+            readyState: v?.readyState,
+            videoWidth: v?.videoWidth,
+            videoHeight: v?.videoHeight,
+          });
+          setCameraError("Camera preview failed to load. Please upload an image instead.");
+        }
+      }, 2500);
+      
+      setCameraError(null);
+    } catch (err) {
+      console.error("Camera: Error accessing camera:", err);
+      
+      if (err instanceof Error) {
+        console.log('Camera: Error details:', {
+          name: err.name,
+          message: err.message,
+          constraint: (err as any).constraint,
+          toString: err.toString()
+        });
+        
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setCameraError("Camera permission was denied. Please allow camera access in your browser settings or upload an image from your gallery.");
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          setCameraError("No camera device found. Please ensure your device has a camera or upload an image from your gallery.");
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+          setCameraError("Camera is already in use by another application. Please close the other app or upload an image from your gallery.");
+        } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+          // Try again with simpler constraints
+          console.log('Camera: Retrying with basic constraints');
+          try {
+            const basicStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            setCameraStream(basicStream);
+            setTimeout(() => {
+              if (videoRef.current) {
+                videoRef.current.srcObject = basicStream;
+                videoRef.current.play().catch(err => {
+                  console.error('Camera: Video play failed on retry:', err);
+                  setCameraError("Failed to start camera preview. Please try uploading from gallery.");
+                });
+              }
+            }, 100);
+
+            if (cameraPreviewTimeoutRef.current) {
+              window.clearTimeout(cameraPreviewTimeoutRef.current);
+            }
+            cameraPreviewTimeoutRef.current = window.setTimeout(() => {
+              const v = videoRef.current;
+              const hasFrames = !!v && v.videoWidth > 0 && v.videoHeight > 0;
+              const canPlay = !!v && v.readyState >= 2;
+              if (!hasFrames || !canPlay) {
+                console.warn('Camera: Preview watchdog triggered after retry - switching to upload fallback', {
+                  readyState: v?.readyState,
+                  videoWidth: v?.videoWidth,
+                  videoHeight: v?.videoHeight,
+                });
+                setCameraError("Camera preview failed to load. Please upload an image instead.");
+              }
+            }, 2500);
+
+            setCameraError(null);
+            return;
+          } catch (retryErr) {
+            console.error('Camera: Retry failed', retryErr);
+            setCameraError("Camera requirements not met. Please upload an image from your gallery.");
+          }
+        } else {
+          setCameraError(`Camera error: ${err.message}. Please upload an image from your gallery.`);
+        }
+      } else {
+        console.error('Camera: Unknown error type', err);
+        setCameraError("Unknown camera error occurred. Please upload an image from your gallery.");
+      }
+    }
+    setIsCameraOpen(true);
+  };
+
+  const handleCapture = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg');
+        setReceiptImage(dataUrl);
+        setReceiptFileName(`receipt-${Date.now()}.jpg`);
+        handleCameraModalClose();
+
+        toast({
+          title: "Receipt Captured",
+          description: "You can now fill in the expense details manually or try AI analysis.",
+        });
+      }
+    }
+  };
+
+  const handleCameraModalClose = () => {
+    console.log('Camera: Closing modal');
+    if (cameraPreviewTimeoutRef.current) {
+      window.clearTimeout(cameraPreviewTimeoutRef.current);
+      cameraPreviewTimeoutRef.current = null;
+    }
+    if (cameraStream) {
+      console.log('Camera: Stopping tracks');
+      cameraStream.getTracks().forEach(track => {
+        track.stop();
+        console.log('Camera: Track stopped:', track.kind, track.label);
+      });
+    }
+    setIsCameraOpen(false);
+    setCameraStream(null);
+    setCameraError(null);
+  };
+
+  const handleGalleryUpload = () => {
+    console.log('Camera: Opening gallery upload');
+    handleCameraModalClose();
+    // Trigger the hidden file input
+    if (receiptFileInputRef.current) {
+      receiptFileInputRef.current.click();
+    }
+  };
 
   if (!isLoggedIn) {
     return (
@@ -257,7 +677,7 @@ export default function Expenses() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold" data-testid="text-monthly-expenses">
-              ${(insights?.totalExpensesThisMonth || 0).toFixed(2)}
+              ${Math.round(insights?.totalExpensesThisMonth || 0)}
             </div>
             {insights && insights.totalExpensesLastMonth > 0 && (
               <p className="text-xs text-muted-foreground">
@@ -282,7 +702,7 @@ export default function Expenses() {
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${(insights?.estimatedNetProfit || 0) >= 0 ? "text-green-600" : "text-red-600"}`} data-testid="text-net-profit">
-              ${(insights?.estimatedNetProfit || 0).toFixed(2)}
+              ${Math.round(insights?.estimatedNetProfit || 0)}
             </div>
             <p className="text-xs text-muted-foreground">
               Expense ratio: {(insights?.expenseToSalesRatio || 0).toFixed(1)}% of sales
@@ -374,7 +794,7 @@ export default function Expenses() {
                       <TableHead>Category</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
                       <TableHead>Note</TableHead>
-                      <TableHead>Added By</TableHead>
+                      <TableHead>Receipt</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -390,13 +810,32 @@ export default function Expenses() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ${expense.amount.toFixed(2)}
+                          ${Math.round(expense.amount)}
                         </TableCell>
                         <TableCell className="max-w-[200px] truncate">
                           {expense.note || "-"}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {expense.staffName || "-"}
+                        <TableCell>
+                          {(() => {
+                            const receiptUrl =
+                              (expense as any).receiptImageUrl ??
+                              (expense as any).receipt_url ??
+                              (expense as any).receipt;
+
+                            return receiptUrl ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => window.open(receiptUrl, '_blank')}
+                                className="flex items-center gap-2 hover:bg-blue-50"
+                              >
+                                <Eye className="w-4 h-4" />
+                                View
+                              </Button>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">-</span>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
@@ -425,12 +864,101 @@ export default function Expenses() {
               </div>
               <div className="flex justify-between items-center mt-4 text-sm">
                 <span className="text-muted-foreground">{filteredExpenses.length} expense(s)</span>
-                <span className="font-semibold">Total: ${totalFiltered.toFixed(2)}</span>
+                <span className="font-semibold">Total: ${Math.round(totalFiltered)}</span>
               </div>
             </>
           )}
         </CardContent>
       </Card>
+
+      {/* Camera Modal */}
+      <Dialog open={isCameraOpen} onOpenChange={handleCameraModalClose}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Take Receipt Photo</DialogTitle>
+            <DialogDescription>
+              {cameraError 
+                ? "Camera access failed. You can upload an image from your gallery instead."
+                : "Position the receipt within the frame and click capture."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative mt-4">
+            {cameraError ? (
+              <div className="space-y-4">
+                <div className="p-4 text-center text-red-500 bg-red-50 rounded-md border border-red-200">
+                  <Camera className="w-12 h-12 mx-auto mb-2 text-red-400" />
+                  <p className="font-semibold">Camera Access Failed</p>
+                  <p className="text-sm mt-1">{cameraError}</p>
+                </div>
+                
+                <div className="text-center text-sm text-muted-foreground">
+                  <p>Alternative: Choose an image from your device gallery</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-auto rounded-md bg-black"
+                  style={{ minHeight: '300px' }}
+                  onLoadedMetadata={() => {
+                    console.log('Camera: Video metadata loaded');
+                    if (cameraPreviewTimeoutRef.current) {
+                      window.clearTimeout(cameraPreviewTimeoutRef.current);
+                      cameraPreviewTimeoutRef.current = null;
+                    }
+                    // Ensure video plays after metadata is loaded
+                    if (videoRef.current) {
+                      videoRef.current.play().catch(err => {
+                        console.error('Camera: Auto-play failed:', err);
+                      });
+                    }
+                  }}
+                  onCanPlay={() => {
+                    console.log('Camera: Video can play');
+                    if (cameraPreviewTimeoutRef.current) {
+                      window.clearTimeout(cameraPreviewTimeoutRef.current);
+                      cameraPreviewTimeoutRef.current = null;
+                    }
+                  }}
+                  onError={(e) => {
+                    console.error('Camera: Video error:', e);
+                    setCameraError("Failed to load camera preview. Please try uploading from gallery.");
+                  }}
+                />
+                
+                <div className="text-center text-xs text-muted-foreground">
+                  <p>Make sure the receipt is clearly visible and well-lit</p>
+                </div>
+              </div>
+            )}
+            <canvas ref={canvasRef} className="hidden" />
+          </div>
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" onClick={handleCameraModalClose}>Cancel</Button>
+            {cameraError ? (
+              <Button onClick={handleGalleryUpload} className="flex items-center gap-2">
+                <Upload className="w-4 h-4" />
+                Choose from Gallery
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={handleGalleryUpload} className="flex items-center gap-2">
+                  <Upload className="w-4 h-4" />
+                  Choose from Gallery
+                </Button>
+                <Button onClick={handleCapture} disabled={!!cameraError} className="flex items-center gap-2">
+                  <Camera className="w-4 h-4" />
+                  Capture Photo
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={addModalOpen} onOpenChange={setAddModalOpen}>
         <DialogContent>
@@ -438,7 +966,7 @@ export default function Expenses() {
             <DialogTitle>Add Expense</DialogTitle>
             <DialogDescription>Record a new business expense</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto p-4">
             <div className="space-y-2">
               <Label htmlFor="category">Category</Label>
               <Select value={formData.category} onValueChange={(val) => setFormData((prev) => ({ ...prev, category: val as ExpenseCategory }))}>
@@ -485,13 +1013,117 @@ export default function Expenses() {
                 data-testid="input-note"
               />
             </div>
+            
+            {/* Receipt Photo Section */}
+            <div className="space-y-2">
+              <Label>Receipt Photo (optional)</Label>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTakePhotoClick}
+                  disabled={isUploadingReceipt}
+                >
+                  <Camera className="w-4 h-4 mr-2" />
+                  Take Receipt Photo
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => receiptFileInputRef.current?.click()}
+                  disabled={isUploadingReceipt}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Choose from Gallery
+                </Button>
+                <input
+                  type="file"
+                  ref={receiptFileInputRef}
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleReceiptFileChange}
+                  multiple={false}
+                />
+              </div>
+              
+              {/* Receipt Preview */}
+              {receiptImage && (
+                <div className="mt-3 p-3 border rounded-lg bg-muted/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium">Receipt Preview</p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleRemoveReceipt}
+                      className="h-6 w-6 p-0"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  {receiptFileName && (
+                    <p className="text-xs text-muted-foreground mb-2">{receiptFileName}</p>
+                  )}
+                  <div className="relative w-full rounded-md overflow-hidden border">
+                    <img
+                      src={receiptImage}
+                      alt="Receipt preview"
+                      className="w-full h-auto max-h-48 object-contain"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Image will be uploaded when you save the expense.
+                  </p>
+                  {receiptImage && (
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          void analyzeReceiptMutation
+                            .mutateAsync(receiptImage)
+                            .then((analysis: any) => {
+                              applyAiSuggestionsToForm(analysis);
+                              toast({
+                                title: "AI Suggestions Applied",
+                                description: "Filled any empty fields. You can still edit everything manually.",
+                              });
+                            })
+                            .catch((err: any) => {
+                              console.error('AI Analysis failed:', err);
+                              toast({
+                                title: "AI Analysis Unavailable",
+                                description: "You can enter the expense details manually. Your receipt image is preserved.",
+                                variant: "default",
+                              });
+                            });
+                        }}
+                        disabled={analyzeReceiptMutation.isPending}
+                        className="text-xs"
+                      >
+                        <Lightbulb className="w-3 h-3 mr-1" />
+                        {analyzeReceiptMutation.isPending ? "Analyzing..." : "Analyze with AI"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeAddModal} data-testid="button-cancel-add">
               Cancel
             </Button>
-            <Button onClick={handleSubmitAdd} disabled={createMutation.isPending} data-testid="button-save-expense">
-              {createMutation.isPending ? "Saving..." : "Save Expense"}
+            <Button 
+              onClick={handleSubmitAdd} 
+              disabled={createMutation.isPending || isUploadingReceipt} 
+              data-testid="button-save-expense"
+            >
+              {isUploadingReceipt ? "Uploading..." : createMutation.isPending ? "Saving..." : "Save Expense"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -503,7 +1135,7 @@ export default function Expenses() {
             <DialogTitle>Edit Expense</DialogTitle>
             <DialogDescription>Update expense details</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto p-4">
             <div className="space-y-2">
               <Label htmlFor="edit-category">Category</Label>
               <Select value={formData.category} onValueChange={(val) => setFormData((prev) => ({ ...prev, category: val as ExpenseCategory }))}>

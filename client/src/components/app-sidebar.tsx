@@ -1,5 +1,6 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt, UserCog, ClipboardList, Wallet } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { LayoutDashboard, ShoppingCart, Package, Users, BarChart3, Boxes, Receipt, UserCog, ClipboardList, Wallet, Camera, Settings } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -12,31 +13,36 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/lib/auth-context";
+import { ShiftButton } from "@/components/shift-button";
+import { ShiftManagement } from "@/components/shift-management";
 import type { StaffRole } from "@shared/schema";
 
 interface NavItem {
-  title: string;
+  titleKey: string;
   url: string;
   icon: typeof LayoutDashboard;
   roles: StaffRole[];
 }
 
 const navItems: NavItem[] = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard, roles: ["owner", "manager"] },
-  { title: "Sales (POS)", url: "/sales", icon: ShoppingCart, roles: ["owner", "manager", "cashier"] },
-  { title: "Inventory", url: "/inventory", icon: Boxes, roles: ["owner", "manager"] },
-  { title: "Customers", url: "/customers", icon: Users, roles: ["owner", "manager", "cashier"] },
-  { title: "Ledger", url: "/ledger", icon: Receipt, roles: ["owner", "manager"] },
-  { title: "Reports", url: "/reports", icon: BarChart3, roles: ["owner", "manager"] },
+  { titleKey: "navigation.dashboard", url: "/", icon: LayoutDashboard, roles: ["owner", "manager"] },
+  { titleKey: "navigation.sales", url: "/sales", icon: ShoppingCart, roles: ["owner", "manager", "cashier"] },
+  { titleKey: "navigation.inventory", url: "/inventory", icon: Boxes, roles: ["owner", "manager"] },
+  { titleKey: "navigation.customers", url: "/customers", icon: Users, roles: ["owner", "manager", "cashier"] },
+  { titleKey: "navigation.ledger", url: "/ledger", icon: Receipt, roles: ["owner", "manager"] },
+  { titleKey: "navigation.reports", url: "/reports", icon: BarChart3, roles: ["owner", "manager"] },
+  { titleKey: "navigation.recognize", url: "/recognize", icon: Camera, roles: ["owner", "manager", "cashier"] },
 ];
 
 const adminItems: NavItem[] = [
-  { title: "Expenses", url: "/expenses", icon: Wallet, roles: ["owner"] },
-  { title: "Staff", url: "/staff", icon: UserCog, roles: ["owner"] },
-  { title: "Attendance", url: "/attendance", icon: ClipboardList, roles: ["owner"] },
+  { titleKey: "navigation.expenses", url: "/expenses", icon: Wallet, roles: ["owner"] },
+  { titleKey: "navigation.staff", url: "/staff", icon: UserCog, roles: ["owner"] },
+  { titleKey: "navigation.attendance", url: "/attendance", icon: ClipboardList, roles: ["owner"] },
+  { titleKey: "navigation.settings", url: "/settings", icon: Settings, roles: ["owner"] },
 ];
 
 export function AppSidebar() {
+  const { t } = useTranslation();
   const [location] = useLocation();
   const { currentStaff, isLoggedIn, isOwner } = useAuth();
 
@@ -59,8 +65,8 @@ export function AppSidebar() {
               <ShoppingCart className="w-4.5 h-4.5 text-white" />
             </div>
             <div className="flex flex-col">
-              <span className="text-base font-semibold text-sidebar-foreground">QuickPOS</span>
-              <span className="text-[10px] text-muted-foreground">Point of Sale</span>
+              <span className="text-base font-semibold text-sidebar-foreground">{t('app.name')}</span>
+              <span className="text-[10px] text-muted-foreground">{t('app.tagline')}</span>
             </div>
           </div>
         </Link>
@@ -72,15 +78,15 @@ export function AppSidebar() {
               {filteredNavItems.map((item) => {
                 const isActive = location === item.url;
                 return (
-                  <SidebarMenuItem key={item.title}>
+                  <SidebarMenuItem key={item.titleKey}>
                     <SidebarMenuButton
                       asChild
                       isActive={isActive}
                       className="py-2.5 px-3"
                     >
-                      <Link href={item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, '-').replace(/[()]/g, '')}`}>
+                      <Link href={item.url} data-testid={`link-${t(item.titleKey).toLowerCase().replace(/\s+/g, '-').replace(/[()]/g, '')}`}>
                         <item.icon className="w-4 h-4" />
-                        <span className="text-sm font-medium">{item.title}</span>
+                        <span className="text-sm font-medium">{t(item.titleKey)}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -97,15 +103,15 @@ export function AppSidebar() {
                 {filteredAdminItems.map((item) => {
                   const isActive = location === item.url;
                   return (
-                    <SidebarMenuItem key={item.title}>
+                    <SidebarMenuItem key={item.titleKey}>
                       <SidebarMenuButton
                         asChild
                         isActive={isActive}
                         className="py-2.5 px-3"
                       >
-                        <Link href={item.url} data-testid={`link-${item.title.toLowerCase()}`}>
+                        <Link href={item.url} data-testid={`link-${t(item.titleKey).toLowerCase()}`}>
                           <item.icon className="w-4 h-4" />
-                          <span className="text-sm font-medium">{item.title}</span>
+                          <span className="text-sm font-medium">{t(item.titleKey)}</span>
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -115,6 +121,11 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         )}
+        
+        {/* Shift Management */}
+        <div className="px-3 py-2">
+          <ShiftManagement className="w-full" />
+        </div>
       </SidebarContent>
     </Sidebar>
   );

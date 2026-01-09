@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Switch, Route } from "wouter";
+import { useState, useEffect } from "react";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -7,10 +7,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { LoginModal } from "@/components/login-modal";
 import { Button } from "@/components/ui/button";
-import { User } from "lucide-react";
+import { User, ShieldAlert } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Sales from "@/pages/sales";
@@ -23,6 +24,9 @@ import CustomerProfile from "@/pages/customer-profile";
 import Staff from "@/pages/staff";
 import Attendance from "@/pages/attendance";
 import Expenses from "@/pages/expenses";
+import Settings from "@/pages/settings";
+import { ImageRecognition } from "@/components/image-recognition";
+import { AIRecognizePage } from "@/pages/ai-recognize";
 
 function Router() {
   return (
@@ -38,6 +42,8 @@ function Router() {
       <Route path="/staff" component={Staff} />
       <Route path="/attendance" component={Attendance} />
       <Route path="/expenses" component={Expenses} />
+      <Route path="/settings" component={Settings} />
+      <Route path="/recognize" component={AIRecognizePage} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -66,6 +72,7 @@ function AppHeader() {
               <span className="hidden sm:inline">Login</span>
             )}
           </Button>
+          <LanguageSwitcher />
           <ThemeToggle />
         </div>
       </header>
@@ -74,27 +81,77 @@ function AppHeader() {
   );
 }
 
-function App() {
+function ProtectedApp() {
+  const { isLoggedIn } = useAuth();
+  const [loginOpen, setLoginOpen] = useState(!isLoggedIn);
+  const [, setLocation] = useLocation();
+
+  // Force login modal on startup if not authenticated
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setLoginOpen(true);
+    }
+  }, [isLoggedIn]);
+
+  // Handle successful login
+  const handleLoginSuccess = () => {
+    setLoginOpen(false);
+    setLocation('/'); // Redirect to dashboard
+  };
+
+  // Block access to content if not logged in
+  if (!isLoggedIn) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-900">
+        <div className="text-center space-y-4 max-w-md px-4">
+          <div className="flex justify-center">
+            <div className="rounded-full bg-primary/10 p-4">
+              <ShieldAlert className="h-12 w-12 text-primary" />
+            </div>
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+            Authentication Required
+          </h1>
+          <p className="text-slate-600 dark:text-slate-400">
+            Please log in with your staff credentials to access Agart POS System
+          </p>
+          <LoginModal
+            open={loginOpen}
+            onOpenChange={setLoginOpen}
+            onSuccess={handleLoginSuccess}
+            required={true}
+          />
+        </div>
+      </div>
+    );
+  }
+
   const style = {
     "--sidebar-width": "14rem",
     "--sidebar-width-icon": "3rem",
   };
 
   return (
+    <SidebarProvider style={style as React.CSSProperties}>
+      <div className="flex h-screen w-full">
+        <AppSidebar />
+        <div className="flex flex-col flex-1 min-w-0">
+          <AppHeader />
+          <main className="flex-1 overflow-auto bg-slate-50 dark:bg-slate-900/50">
+            <Router />
+          </main>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+}
+
+function App() {
+  return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
-          <SidebarProvider style={style as React.CSSProperties}>
-            <div className="flex h-screen w-full">
-              <AppSidebar />
-              <div className="flex flex-col flex-1 min-w-0">
-                <AppHeader />
-                <main className="flex-1 overflow-auto bg-slate-50 dark:bg-slate-900/50">
-                  <Router />
-                </main>
-              </div>
-            </div>
-          </SidebarProvider>
+          <ProtectedApp />
         </AuthProvider>
         <Toaster />
       </TooltipProvider>

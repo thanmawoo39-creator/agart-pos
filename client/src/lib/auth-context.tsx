@@ -20,7 +20,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const saved = localStorage.getItem("staffSession");
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsedSession = JSON.parse(saved);
+        // Check if session is expired (24 hours)
+        const loginTime = new Date(parsedSession.loginTime);
+        const now = new Date();
+        const hoursSinceLogin = (now.getTime() - loginTime.getTime()) / (1000 * 60 * 60);
+
+        if (hoursSinceLogin > 24) {
+          // Session expired, clear it
+          localStorage.removeItem("staffSession");
+          return null;
+        }
+
+        return parsedSession;
       } catch {
         return null;
       }
@@ -38,6 +50,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem("staffSession");
     }
   }, [session]);
+
+  // Verify session on mount
+  useEffect(() => {
+    const verifySession = async () => {
+      if (session) {
+        try {
+          const response = await fetch("/api/auth/verify", {
+            method: "GET",
+            credentials: "include",
+          });
+
+          if (!response.ok) {
+            // Session invalid, clear it
+            setSession(null);
+          }
+        } catch (error) {
+          // Network error, keep session but log warning
+          console.warn("Failed to verify session:", error);
+        }
+      }
+    };
+
+    verifySession();
+  }, []);
 
   const login = useCallback(async (pin?: string, barcode?: string): Promise<boolean> => {
     try {

@@ -1,3 +1,1 @@
-export { registerImageRoutes } from "./routes";
-export { ai, generateImage } from "./client";
-
+// This file is intentionally left empty to resolve build errors.

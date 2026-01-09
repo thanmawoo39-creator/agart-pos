@@ -1,0 +1,56 @@
+.receipt-container {
+  font-family: 'monospace', sans-serif;
+  width: 300px;
+  padding: 1rem;
+  font-size: 12px;
+}
+
+.receipt-header {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.shop-name {
+  font-size: 1.2rem;
+  font-weight: bold;
+}
+
+.receipt-body table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.receipt-body th,
+.receipt-body td {
+  border-bottom: 1px dashed #ccc;
+  padding: 0.5rem 0;
+}
+
+.receipt-body th {
+  text-align: left;
+}
+
+.total-section {
+  margin-top: 1rem;
+  text-align: right;
+}
+
+.receipt-footer {
+  text-align: center;
+  margin-top: 1rem;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .receipt-container, .receipt-container * {
+    visibility: visible;
+  }
+  .receipt-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

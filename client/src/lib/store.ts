@@ -6,6 +6,9 @@ interface CartState {
   items: CartItem[];
   linkedCustomer: Customer | null;
   discount: number;
+  saleErrorProductIds: string[];
+  setSaleErrorProductIds: (productIds: string[]) => void;
+  clearSaleErrorProductIds: () => void;
   addItem: (product: Product, quantity?: number) => void;
   removeItem: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
@@ -13,8 +16,8 @@ interface CartState {
   setDiscount: (discount: number) => void;
   clearCart: () => void;
   getSubtotal: () => number;
-  getTax: () => number;
-  getTotal: () => number;
+  getTax: (taxRate?: number, enableTax?: boolean) => number;
+  getTotal: (taxRate?: number, enableTax?: boolean) => number;
   getItemCount: () => number;
 }
 
@@ -37,7 +40,7 @@ interface AIState {
 
 interface AppState extends CartState, StoreState, AIState {}
 
-const TAX_RATE = 0.08;
+const TAX_RATE = 0.08; // Fallback tax rate
 
 export const useStore = create<AppState>()(
   persist(
@@ -46,6 +49,7 @@ export const useStore = create<AppState>()(
       items: [],
       linkedCustomer: null,
       discount: 0,
+      saleErrorProductIds: [],
 
       addItem: (product: Product, quantity: number = 1) => {
         set((state) => {
@@ -114,23 +118,32 @@ export const useStore = create<AppState>()(
       },
 
       clearCart: () => {
-        set({ items: [], linkedCustomer: null, discount: 0, alerts: [] });
+        set({ items: [], linkedCustomer: null, discount: 0, alerts: [], saleErrorProductIds: [] });
+      },
+
+      setSaleErrorProductIds: (productIds: string[]) => {
+        set({ saleErrorProductIds: productIds });
+      },
+
+      clearSaleErrorProductIds: () => {
+        set({ saleErrorProductIds: [] });
       },
 
       getSubtotal: () => {
         return get().items.reduce((sum, item) => sum + item.total, 0);
       },
 
-      getTax: () => {
+      getTax: (taxRate: number = TAX_RATE, enableTax: boolean = true) => {
+        if (!enableTax) return 0;
         const subtotal = get().getSubtotal();
         const discount = get().discount;
-        return (subtotal - discount) * TAX_RATE;
+        return (subtotal - discount) * taxRate;
       },
 
-      getTotal: () => {
+      getTotal: (taxRate: number = TAX_RATE, enableTax: boolean = true) => {
         const subtotal = get().getSubtotal();
         const discount = get().discount;
-        const tax = get().getTax();
+        const tax = get().getTax(taxRate, enableTax);
         return subtotal - discount + tax;
       },
 
@@ -166,7 +179,7 @@ export const useStore = create<AppState>()(
       },
     }),
     {
-      name: "quickpos-storage",
+      name: "agartpos-storage",
       partialize: (state) => ({
         items: state.items,
         linkedCustomer: state.linkedCustomer,

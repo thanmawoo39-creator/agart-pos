@@ -29,7 +29,7 @@ The frontend follows a standard React SPA pattern with pages organized under `cl
 The server handles API routes in `server/routes.ts` and uses a storage abstraction layer in `server/storage.ts` that implements the `IStorage` interface for data operations.
 
 ### Data Storage
-- **Primary Storage**: Replit Database (key-value store) via `@replit/database` package
+- **Primary Storage**: better-sqlite3 (in-memory)
 - **Schema Definition**: Zod schemas in `shared/schema.ts` for runtime validation
 - **Database Config**: Drizzle ORM configuration exists for PostgreSQL migration capability
 
@@ -124,7 +124,7 @@ The current implementation uses Replit's key-value database with collection-base
 ## External Dependencies
 
 ### Core Services
-- **Replit Database**: Primary data persistence using `@replit/database` package for key-value storage
+- **better-sqlite3**: Primary data persistence for in-memory storage
 - **PostgreSQL** (configured but not active): Drizzle ORM setup exists in `drizzle.config.ts` for potential database migration
 
 ### Frontend Libraries

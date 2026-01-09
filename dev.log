@@ -1,0 +1,22 @@
+
+> rest-express@1.0.0 dev
+> set NODE_ENV=development && tsx server/index.ts
+
+[dotenv@17.2.3] injecting env (6) from .env -- tip: 🔄 add secrets lifecycle management: https://dotenvx.com/ops
+Checking for processes on port 5000...
+GEMINI_API_KEY Loaded
+Running database migrations...
+✅ Currency columns already exist, skipping migration
+✅ Description column already exists in expenses table
+✅ Note column already exists in expenses table
+✅ Receipt_image_url column already exists in expenses table
+❌ Failed to start server: SqliteError: no such column: "groq_api_key" - should this be a string literal in single-quotes?
+    at Database.prepare (C:\Users\USER\Desktop\POS-System-Architect - Copy\node_modules\better-sqlite3\lib\methods\wrappers.js:5:21)
+    at BetterSQLiteSession.prepareQuery (C:\Users\USER\Desktop\POS-System-Architect - Copy\node_modules\src\better-sqlite3\session.ts:60:28)
+    at BetterSQLiteSession.prepareOneTimeQuery (C:\Users\USER\Desktop\POS-System-Architect - Copy\node_modules\src\sqlite-core\session.ts:250:15)
+    at SQLiteSelectBase._prepare (C:\Users\USER\Desktop\POS-System-Architect - Copy\node_modules\src\sqlite-core\query-builders\select.ts:916:85)
+    at SQLiteSelectBase.all (C:\Users\USER\Desktop\POS-System-Architect - Copy\node_modules\src\sqlite-core\query-builders\select.ts:950:15)
+    at SQLiteSelectBase.execute (C:\Users\USER\Desktop\POS-System-Architect - Copy\node_modules\src\sqlite-core\query-builders\select.ts:962:15)
+    at SQLiteSelectBase.then (C:\Users\USER\Desktop\POS-System-Architect - Copy\node_modules\src\query-promise.ts:31:15) {
+  code: 'SQLITE_ERROR'
+}

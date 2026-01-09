@@ -98,10 +98,13 @@ export default function Reports() {
   });
 
   const formatCurrency = (amount: number) => {
+    const roundedAmount = Math.round(amount);
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-    }).format(amount);
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(roundedAmount);
   };
 
   const formatDate = (timestamp: string) => {

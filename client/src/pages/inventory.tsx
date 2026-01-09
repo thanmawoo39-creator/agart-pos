@@ -16,6 +16,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -32,8 +42,22 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
-import { Package, AlertTriangle, Plus, Minus, Search, History, Barcode, Shuffle, Lock } from "lucide-react";
+import { Package, AlertTriangle, Plus, Minus, Search, History, Barcode, Shuffle, Lock, Image, Pencil, Trash, Loader2, Sparkles } from "lucide-react";
 import type { Product, InventoryLog } from "@shared/schema";
+import { API_BASE_URL } from "@/lib/api-config";
+
+type NewProductForm = {
+  name: string;
+  barcode: string;
+  price: string;
+  cost: string;
+  stock: string;
+  minStockLevel: string;
+  category: string;
+  unit: string;
+  imageData?: string | undefined;
+  imageUrl?: string | undefined;
+};
 
 function generateBarcode(): string {
   let barcode = "";
@@ -54,10 +78,11 @@ export default function Inventory() {
   const [addProductModalOpen, setAddProductModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [adjustmentType, setAdjustmentType] = useState<"add" | "subtract">("add");
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
   
-  const [newProduct, setNewProduct] = useState({
+  const [newProduct, setNewProduct] = useState<NewProductForm>({
     name: "",
     barcode: "",
     price: "",
@@ -66,9 +91,61 @@ export default function Inventory() {
     minStockLevel: "",
     category: "",
     unit: "pcs",
+    imageData: undefined,
+    imageUrl: undefined,
+  });
+  const [isEditing, setIsEditing] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<string | null>(null);
+  const [isEditingProduct, setIsEditingProduct] = useState(false);
+  const [cameraModalOpen, setCameraModalOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // AI Product Recognition
+  const identifyProductMutation = useMutation({
+    mutationFn: async (imageData: string) => {
+      const response = await apiRequest("POST", "/api/ai/identify-product", { image: imageData });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      // Auto-populate form fields with AI response
+      if (data.name) {
+        setNewProduct(prev => ({ ...prev, name: data.name }));
+      }
+      if (data.category) {
+        setNewProduct(prev => ({ ...prev, category: data.category }));
+      }
+      if (data.estimatedPrice) {
+        setNewProduct(prev => ({ ...prev, price: data.estimatedPrice.toString() }));
+      }
+      toast({
+        title: "AI Product Recognition",
+        description: "Product details have been automatically filled. Please review and save.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "AI Recognition Failed",
+        description: "Could not identify the product. Please enter details manually.",
+        variant: "destructive",
+      });
+    },
   });
 
-  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (loadEvent) => {
+        setNewProduct((prev) => ({ ...prev, imageData: loadEvent.target?.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const isLoggedIn = !!session;
   const canManageStock = canAccess("manager");
 
@@ -81,6 +158,104 @@ export default function Inventory() {
     enabled: !!selectedProduct && historyModalOpen,
   });
 
+  const handleDelete = (id: string) => {
+    setProductToDelete(id);
+    setDeleteConfirmOpen(true);
+  };
+  
+  const openEditModal = (product: Product) => {
+    setIsEditing(true);
+    setSelectedProduct(product);
+    setNewProduct({
+        name: product.name,
+        barcode: product.barcode || "",
+        price: String(product.price),
+        cost: String(product.cost || ""),
+        stock: String(product.stock),
+        minStockLevel: String(product.minStockLevel),
+        category: product.category || "",
+        unit: product.unit || "pcs",
+        imageData: product.imageData ?? undefined,
+        imageUrl: product.imageUrl ?? undefined,
+    });
+    setAddProductModalOpen(true);
+  };
+  
+  // Camera lifecycle managed via useEffect when camera modal opens
+  useEffect(() => {
+    let mounted = true;
+    if (!cameraModalOpen) {
+      // cleanup if closing
+      try {
+        streamRef.current?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+      } catch (e) {
+        console.error('Error stopping camera tracks when modal closed:', (e as any)?.name || e);
+      }
+      streamRef.current = null;
+      if (videoRef.current) {
+        try { videoRef.current.pause(); videoRef.current.srcObject = null; } catch (e) { console.error(e); }
+      }
+      return;
+    }
+
+    const start = async () => {
+      setCameraError(null);
+      const tryConstraints = async (constraints: MediaStreamConstraints) => {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      };
+
+      let stream: MediaStream | null = null;
+      try {
+        try {
+          stream = await tryConstraints({ video: { facingMode: 'environment' } });
+        } catch (err: any) {
+          console.error('Inventory primary getUserMedia failed (environment):', err?.name, err?.message || err);
+          if (err?.name === 'NotReadableError') {
+            setCameraError('Camera is being used by another application');
+          }
+          try {
+            stream = await tryConstraints({ video: true });
+          } catch (err2: any) {
+            console.error('Inventory fallback getUserMedia failed:', err2?.name, err2?.message || err2);
+            if (mounted) setCameraError(err2?.message || 'Failed to access camera');
+            return;
+          }
+        }
+
+        if (!mounted || !stream) return;
+        streamRef.current = stream;
+        if (videoRef.current) {
+          try {
+            videoRef.current.srcObject = stream;
+            videoRef.current.muted = true;
+            videoRef.current.playsInline = true;
+            (videoRef.current as HTMLVideoElement).autoplay = true as any;
+            await (videoRef.current as HTMLVideoElement).play();
+          } catch (playErr: any) {
+            console.error('Inventory video play() failed after attaching stream:', playErr?.name, playErr?.message || playErr);
+          }
+        } else {
+          console.error('inventory videoRef.current is null after stream obtained');
+        }
+      } catch (e: any) {
+        console.error('Unexpected camera initialization error in Inventory:', e?.name, e?.message || e);
+        if (mounted) setCameraError(e?.message || 'Failed to start camera');
+      }
+    };
+
+    start();
+
+    return () => {
+      mounted = false;
+      try { streamRef.current?.getTracks().forEach((t: MediaStreamTrack) => t.stop()); } catch (e) { console.error('Error stopping camera tracks (inventory cleanup):', (e as any)?.name || e); }
+      streamRef.current = null;
+      if (videoRef.current) {
+        try { videoRef.current.pause(); videoRef.current.srcObject = null; } catch (e) { console.error(e); }
+      }
+    };
+  }, [cameraModalOpen]);
+
+  
   const adjustMutation = useMutation({
     mutationFn: (data: { productId: string; quantityChange: number; type: string; reason: string; staffName?: string }) =>
       apiRequest("POST", `/api/inventory/adjust/${data.productId}`, {
@@ -107,7 +282,7 @@ export default function Inventory() {
   });
 
   const createProductMutation = useMutation({
-    mutationFn: (data: Omit<Product, "id">) => apiRequest("POST", "/api/products", data),
+    mutationFn: (data: Omit<Product, "id" | "status"> & { status?: string }) => apiRequest("POST", "/api/products", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       toast({ title: "Product added successfully" });
@@ -120,6 +295,30 @@ export default function Inventory() {
         variant: "destructive",
       });
     },
+  });
+
+  const updateProductMutation = useMutation({
+    mutationFn: (payload: { id: string; data: Partial<Product> }) => apiRequest("PATCH", `/api/products/${payload.id}`, payload.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      toast({ title: "Product updated" });
+      setIsEditingProduct(false);
+      closeAddProductModal();
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to update product", description: err.message, variant: 'destructive' });
+    }
+  });
+
+  const deleteProductMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/products/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      toast({ title: "Product deleted" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to delete", description: err.message, variant: 'destructive' });
+    }
   });
 
   useEffect(() => {
@@ -155,6 +354,8 @@ export default function Inventory() {
 
   const closeAddProductModal = () => {
     setAddProductModalOpen(false);
+    setIsEditing(false);
+    setSelectedProduct(null);
     setNewProduct({
       name: "",
       barcode: "",
@@ -164,6 +365,8 @@ export default function Inventory() {
       minStockLevel: "",
       category: "",
       unit: "pcs",
+      imageUrl: undefined,
+      imageData: undefined,
     });
   };
 
@@ -191,7 +394,7 @@ export default function Inventory() {
     });
   };
 
-  const handleAddProduct = () => {
+  const handleSaveProduct = () => {
     if (!newProduct.name.trim()) {
       toast({ title: "Product name is required", variant: "destructive" });
       return;
@@ -203,23 +406,113 @@ export default function Inventory() {
     }
     const stock = parseInt(newProduct.stock) || 0;
     const minStock = parseInt(newProduct.minStockLevel) || 5;
-
     const cost = parseFloat(newProduct.cost);
-    
-    createProductMutation.mutate({
+
+    const productData = {
       name: newProduct.name.trim(),
       barcode: newProduct.barcode.trim() || undefined,
       price,
       cost: isNaN(cost) ? undefined : cost,
+      imageData: (newProduct as any).imageData || undefined,
+      imageUrl: newProduct.imageUrl || undefined,
       stock,
       minStockLevel: minStock,
-      category: newProduct.category.trim() || undefined,
+      category: newProduct.category.trim() || null,
       unit: newProduct.unit || "pcs",
-    });
+    };
+
+    if (isEditing && selectedProduct) {
+      updateProductMutation.mutate({ id: selectedProduct.id, data: productData });
+    } else {
+      createProductMutation.mutate(productData);
+    }
   };
 
   const handleGenerateBarcode = () => {
     setNewProduct((prev) => ({ ...prev, barcode: generateBarcode() }));
+  };
+
+  // Camera helpers for Add Product photo
+  const startCamera = async () => {
+    try {
+      // Use a simple video constraint for broader compatibility
+      const constraints: MediaStreamConstraints = { video: true };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      if (videoRef.current) {
+        try {
+          videoRef.current.srcObject = stream;
+          videoRef.current.muted = true;
+          videoRef.current.playsInline = true;
+          videoRef.current.autoplay = true as any;
+          await videoRef.current.play();
+        } catch (playErr: any) {
+          console.error('Inventory video play() failed after attaching stream:', playErr?.name, playErr?.message || playErr);
+        }
+      }
+      setCameraModalOpen(true);
+    } catch (err: any) {
+      console.error('Could not access camera in Inventory:', err?.name || 'UnknownError', err?.message || err);
+    }
+  };
+
+  const stopCamera = () => {
+    try {
+      streamRef.current?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+    } catch (e) {
+      console.error('Error stopping camera tracks:', (e as any)?.name || e);
+    }
+    streamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
+    setCameraModalOpen(false);
+  };
+
+  const captureProductPhoto = async () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // compress the captured image to JPEG to reduce size
+    const compress = async (c: HTMLCanvasElement, maxWidth = 1024, quality = 0.8) => {
+      const width = c.width;
+      const height = c.height;
+      let targetWidth = width;
+      let targetHeight = height;
+      if (width > maxWidth) {
+        targetWidth = maxWidth;
+        targetHeight = Math.round((maxWidth / width) * height);
+      }
+      const tmp = document.createElement('canvas');
+      tmp.width = targetWidth;
+      tmp.height = targetHeight;
+      const tctx = tmp.getContext('2d');
+      if (!tctx) return null;
+      tctx.drawImage(c, 0, 0, targetWidth, targetHeight);
+      return await new Promise<Blob | null>((resolve) => tmp.toBlob((b) => resolve(b), 'image/jpeg', quality));
+    };
+
+    const blob = await compress(canvas);
+    if (!blob) {
+      stopCamera();
+      return;
+    }
+    // convert blob to dataURL for storage in product.imageData
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Failed to read compressed image'));
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
+    setNewProduct((prev) => ({ ...prev, imageData: dataUrl } as any));
+    stopCamera();
   };
 
   const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))) as string[];
@@ -267,7 +560,7 @@ export default function Inventory() {
               Please Login to Manage Stock
             </Badge>
           ) : canManageStock ? (
-            <Button onClick={() => setAddProductModalOpen(true)} data-testid="button-add-product">
+            <Button onClick={() => { setIsEditing(false); setNewProduct({ name: "", barcode: "", price: "", cost: "", stock: "", minStockLevel: "", category: "", unit: "pcs", imageData: undefined, imageUrl: undefined }); setAddProductModalOpen(true); }} data-testid="button-add-product">
               <Plus className="w-4 h-4 mr-2" />
               Add Product
             </Button>
@@ -291,7 +584,7 @@ export default function Inventory() {
               data-testid="input-barcode-scan"
             />
             <div className="ml-auto text-sm text-muted-foreground">
-              Total Stock Value: <span className="font-bold text-foreground">${totalStockValue.toFixed(2)}</span>
+              Total Stock Value: <span className="font-bold text-foreground">${Math.round(totalStockValue)}</span>
             </div>
           </div>
         </CardContent>
@@ -335,6 +628,7 @@ export default function Inventory() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Image</TableHead>
                   <TableHead>Product</TableHead>
                   <TableHead className="hidden md:table-cell">Category</TableHead>
                   <TableHead className="hidden lg:table-cell">Barcode</TableHead>
@@ -354,12 +648,31 @@ export default function Inventory() {
                   const profitMargin = product.cost && product.cost > 0
                     ? ((product.price - product.cost) / product.price * 100).toFixed(1)
                     : null;
+
+                  const imageUrl = product.imageUrl
+                    ? product.imageUrl.startsWith('http')
+                      ? product.imageUrl
+                      : `${API_BASE_URL}/uploads/${product.imageUrl}`
+                    : product.imageData;
+
+                  if (imageUrl) {
+                    console.log("Full Image URL:", imageUrl);
+                  }
                   return (
                     <TableRow
                       key={product.id}
                       data-testid={`row-product-${product.id}`}
                       className={isLowStock ? "bg-red-50 dark:bg-red-950/20" : ""}
                     >
+                      <TableCell>
+                        {imageUrl ? (
+                          <img src={imageUrl} alt={product.name} className="w-10 h-10 object-cover rounded" style={{ position: 'relative', zIndex: 50 }} />
+                        ) : (
+                          <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
+                            <Image className="w-5 h-5 text-muted-foreground" />
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="font-medium">
                         <span className="block truncate max-w-[150px] md:max-w-none">
                           {product.name}
@@ -375,7 +688,7 @@ export default function Inventory() {
                         {product.barcode || "-"}
                       </TableCell>
                       <TableCell className="text-right">
-                        ${product.price.toFixed(2)}
+                        ${Math.round(product.price)}
                       </TableCell>
                       <TableCell className="text-right hidden md:table-cell">
                         {profitMargin ? (
@@ -395,7 +708,7 @@ export default function Inventory() {
                         </span>
                       </TableCell>
                       <TableCell className="text-right hidden sm:table-cell">
-                        <span className="font-medium">${stockValue.toFixed(2)}</span>
+                        <span className="font-medium">${Math.round(stockValue)}</span>
                       </TableCell>
                       <TableCell className="text-center text-muted-foreground hidden sm:table-cell">
                         {product.minStockLevel}
@@ -438,6 +751,20 @@ export default function Inventory() {
                             >
                               <History className="w-4 h-4" />
                             </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => openEditModal(product)}
+                            >
+                              <Pencil className="w-4 h-4 text-blue-600" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => handleDelete(product.id)}
+                            >
+                              <Trash className="w-4 h-4 text-destructive" />
+                            </Button>
                           </div>
                         </TableCell>
                       )}
@@ -458,11 +785,11 @@ export default function Inventory() {
       </Card>
 
       <Dialog open={addProductModalOpen} onOpenChange={setAddProductModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add New Product</DialogTitle>
+            <DialogTitle>{isEditing ? "Edit Product" : "Add New Product"}</DialogTitle>
             <DialogDescription>
-              Enter product details to add to inventory
+              {isEditing ? "Update the product details." : "Enter product details to add to inventory."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -477,6 +804,74 @@ export default function Inventory() {
                 placeholder="Enter product name"
                 data-testid="input-product-name"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="product-image-url">Image URL</Label>
+              <Input
+                id="product-image-url"
+                value={newProduct.imageUrl || ""}
+                onChange={(e) => setNewProduct((prev) => ({ ...prev, imageUrl: e.target.value }))}
+                placeholder="https://example.com/image.png"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Product Photo</Label>
+              {(newProduct.imageData || newProduct.imageUrl) && (
+                <div className="mt-2">
+                  <img
+                    src={(() => {
+                    const imageUrl = newProduct.imageUrl
+                      ? newProduct.imageUrl.startsWith('http')
+                        ? newProduct.imageUrl
+                        : `${API_BASE_URL}/uploads/${newProduct.imageUrl}`
+                      : undefined;
+                    const finalUrl = newProduct.imageData || imageUrl;
+                    if (finalUrl) {
+                      console.log("Full Image URL:", finalUrl);
+                    }
+                    return finalUrl;
+                  })()}
+                    alt="Product preview" 
+                    className="w-full h-32 object-cover rounded-lg border" style={{ position: 'relative', zIndex: 50 }}
+                  />
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <Button onClick={startCamera} data-testid="button-take-photo">Take Photo</Button>
+                <Button onClick={() => fileInputRef.current?.click()} variant="outline">Upload Image</Button>
+                <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
+                {newProduct.imageData && (
+                  <>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setNewProduct((p) => ({ ...p, imageData: undefined } as any))}
+                    >
+                      Remove Photo
+                    </Button>
+                    <Button
+                      onClick={() => identifyProductMutation.mutate(newProduct.imageData!)}
+                      disabled={identifyProductMutation.isPending}
+                      variant="secondary"
+                      className="flex items-center gap-2"
+                    >
+                      {identifyProductMutation.isPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          AI က ခွဲခြမ်းစိတ်ဖြာနေပါတယ်...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          Analyze Image
+                        </>
+                      )}
+                    </Button>
+                  </>
+                )}
+              </div>
+              {newProduct.imageData && (
+                <img src={(newProduct as any).imageData} alt="preview" className="mt-2 max-h-40 object-contain border" />
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="product-barcode">Barcode</Label>
@@ -595,13 +990,64 @@ export default function Inventory() {
               Cancel
             </Button>
             <Button
-              onClick={handleAddProduct}
-              disabled={createProductMutation.isPending}
+              onClick={handleSaveProduct}
+              disabled={createProductMutation.isPending || updateProductMutation.isPending}
               data-testid="button-submit-product"
             >
-              {createProductMutation.isPending ? "Adding..." : "Add Product"}
+              {isEditing
+                ? updateProductMutation.isPending ? "Saving..." : "Save Changes"
+                : createProductMutation.isPending ? "Adding..." : "Add Product"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the product from your inventory.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (productToDelete) {
+                  deleteProductMutation.mutate(productToDelete);
+                }
+                setDeleteConfirmOpen(false);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={cameraModalOpen} onOpenChange={(open) => { if (!open) stopCamera(); setCameraModalOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Take Product Photo</DialogTitle>
+            <DialogDescription>
+              Position the product in front of your camera and capture a clear photo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="bg-black">
+              <video ref={videoRef} className="w-full max-h-96 object-contain" playsInline autoPlay muted />
+            </div>
+            {cameraError && (
+              <div className="text-sm text-destructive">{cameraError}</div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => { stopCamera(); }}>
+                Cancel
+              </Button>
+              <Button onClick={captureProductPhoto} data-testid="button-capture-product">Capture</Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

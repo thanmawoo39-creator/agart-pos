@@ -1,667 +1,1021 @@
-import { useState, useCallback, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
-import { useStore } from "@/lib/store";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useAuth } from "@/lib/auth-context";
-import { ShiftButton } from "@/components/shift-button";
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useReactToPrint } from 'react-to-print';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 import {
   ShoppingCart,
-  Search,
-  User,
-  Trash2,
-  Plus,
-  Minus,
-  Banknote,
+  Camera,
   Smartphone,
-  CreditCard,
-  AlertTriangle,
-  Lightbulb,
-  CheckCircle,
   X,
-  Sparkles,
-  Zap,
-  Clock,
-} from "lucide-react";
-import type { Product, Customer, InsertSale, SaleItem, CurrentShift } from "@shared/schema";
+  Upload,
+  Printer
+} from 'lucide-react';
+import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
+import { SalesGrid } from '@/components/SalesGrid';
+import { CartSection } from '@/components/CartSection';
+import { SalesHistory } from '@/components/SalesHistory';
+import ReceiptTemplate from '@/components/ReceiptTemplate';
+import MobileScanner from '@/components/MobileScanner';
+import { Product, CartItem, Customer, Sale } from '@/types/sales';
+import { API_BASE_URL } from '@/lib/api-config';
+import { isCustomerCode } from '@/hooks/use-scanner';
+
+// Helper function to format currency in Myanmar Kyat
+const formatCurrency = (amount: number): string => {
+  return new Intl.NumberFormat('my-MM', {
+    style: 'currency',
+    currency: 'MMK',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
 
 export default function Sales() {
+  const [activeTab, setActiveTab] = useState('new-sale');
+  const [selectedCustomer, setSelectedCustomer] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [showMobilePayment, setShowMobilePayment] = useState(false);
+  const [showCameraModal, setShowCameraModal] = useState(false);
+  const [paymentSlipUrl, setPaymentSlipUrl] = useState<string>('');
+  const [capturedImage, setCapturedImage] = useState<string>('');
+  const [lastSaleId, setLastSaleId] = useState<string>('');
+  const [amountReceived, setAmountReceived] = useState<number>(0);
+  const [lastSaleTotal, setLastSaleTotal] = useState<number>(0);
+  const [lastSaleData, setLastSaleData] = useState<{
+    cartItems: CartItem[];
+    total: number;
+    paymentMethod: string;
+    amountReceived: number;
+    timestamp: string;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scannerRef = useRef<any>(null);
+  const [scanner, setScanner] = useState<any>(null);
+  const [showScanner, setShowScanner] = useState(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
   const { toast } = useToast();
-  const { currentStaff, isCashier } = useAuth();
-  const [scanInput, setScanInput] = useState("");
-  const [customerScanInput, setCustomerScanInput] = useState("");
-  const [lastScannedProduct, setLastScannedProduct] = useState<string | null>(null);
-  
-  // Global barcode scanner state
-  const barcodeBuffer = useRef<string>("");
-  const barcodeTimeout = useRef<NodeJS.Timeout | null>(null);
+  const queryClient = useQueryClient();
+  const componentRef = useRef(null);
+  const [isCustomerScannerOpen, setIsCustomerScannerOpen] = useState(false);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
 
-  // Check if someone is clocked in
-  const { data: currentShift, isLoading: shiftLoading } = useQuery<CurrentShift>({
-    queryKey: ["/api/attendance/current"],
-    refetchInterval: 30000,
-  });
-  
-  const {
-    items,
-    linkedCustomer,
-    discount,
-    addItem,
-    removeItem,
-    updateQuantity,
-    setLinkedCustomer,
-    clearCart,
-    getSubtotal,
-    getTax,
-    getTotal,
-    getItemCount,
-    alerts,
-    addAlert,
-    clearAlerts,
-    setAlerts,
-  } = useStore();
+  const handleCustomerScanSuccess = (decodedText: string) => {
+    if (isCustomerCode(decodedText)) {
+      const foundCustomer = customers.find(c =>
+        (c.barcode && c.barcode.toUpperCase() === decodedText.toUpperCase()) ||
+        c.id === decodedText
+      );
 
-  const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
-  });
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
+      if (foundCustomer) {
+        setSelectedCustomer(foundCustomer.id);
+        const creditDisplay = (foundCustomer.currentBalance ?? 0) > 0
+          ? `Debt: ${formatCurrency(foundCustomer.currentBalance ?? 0)}`
+          : 'No Outstanding Debt';
+        toast({
+          title: `👤 Customer Linked: ${foundCustomer.name}`,
+          description: creditDisplay,
+        });
+      } else {
+        toast({
+          title: "Customer Not Found",
+          description: `No customer found with code: ${decodedText}`,
+          variant: "destructive",
+        });
+      }
+    } else {
+        toast({
+            title: "Invalid Customer Card",
+            description: "This does not appear to be a valid customer card.",
+            variant: "destructive",
+        });
+    }
   };
 
-  // Check AI alerts when cart or customer changes
-  useEffect(() => {
-    const newAlerts: { type: "warning" | "tip" | "success"; message: string }[] = [];
+  // Cart state from local component (can be migrated to useCart hook later)
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const clearCart = () => setCart([]);
 
-    // Check credit limit if customer is linked
-    if (linkedCustomer) {
-      const total = getTotal();
-      const potentialBalance = linkedCustomer.currentBalance + total;
-      if (potentialBalance > linkedCustomer.creditLimit && linkedCustomer.creditLimit > 0) {
-        newAlerts.push({
-          type: "warning",
-          message: `High Risk: Customer ${linkedCustomer.name} is near credit limit.`,
-        });
-      }
+  const handlePrint = useReactToPrint({
+    content: () => componentRef.current,
+  } as any);
+
+  // Fetch products
+  const { data: products = [], isLoading: productsLoading } = useQuery<Product[]>({
+    queryKey: ['products'],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/products`);
+      if (!response.ok) throw new Error('Failed to fetch products');
+      return response.json();
     }
-
-    // Check low stock for items in cart
-    items.forEach((item) => {
-      if (item.product && item.product.stock < 5) {
-        newAlerts.push({
-          type: "tip",
-          message: `Low stock! ${item.product.name} has only ${item.product.stock} units. Remind owner to restock soon.`,
-        });
-      }
-    });
-
-    setAlerts(newAlerts);
-  }, [items, linkedCustomer, getTotal, setAlerts]);
-
-  // Handle product scan
-  const handleScan = useCallback(
-    async (barcode: string) => {
-      if (!barcode.trim()) return;
-
-      try {
-        const response = await fetch(`/api/scan/product/${encodeURIComponent(barcode)}`);
-        if (response.ok) {
-          const product: Product = await response.json();
-          addItem(product, 1);
-          toast({
-            title: "Product Added",
-            description: `${product.name} added to cart`,
-          });
-          
-          // Check low stock alert
-          if (product.stock < 5) {
-            addAlert({
-              type: "tip",
-              message: `Low stock! ${product.name} has only ${product.stock} units. Remind owner to restock soon.`,
-            });
-          }
-        } else {
-          toast({
-            title: "Product Not Found",
-            description: `No product found with barcode: ${barcode}`,
-            variant: "destructive",
-          });
-        }
-      } catch (error) {
-        toast({
-          title: "Scan Error",
-          description: "Failed to scan product",
-          variant: "destructive",
-        });
-      }
-      setScanInput("");
-    },
-    [addItem, addAlert, toast]
-  );
-
-  // Global barcode scanner listener
-  // Barcode scanners typically send characters very rapidly followed by Enter
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input field
-      const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {
-        return;
-      }
-
-      // Clear previous timeout
-      if (barcodeTimeout.current) {
-        clearTimeout(barcodeTimeout.current);
-      }
-
-      // Handle Enter key - process the barcode
-      if (e.key === "Enter" && barcodeBuffer.current.length > 0) {
-        const barcode = barcodeBuffer.current;
-        barcodeBuffer.current = "";
-        handleScan(barcode);
-        setLastScannedProduct(barcode);
-        // Clear highlight after 2 seconds
-        setTimeout(() => setLastScannedProduct(null), 2000);
-        return;
-      }
-
-      // Only accumulate alphanumeric characters
-      if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
-        barcodeBuffer.current += e.key;
-        
-        // Reset buffer after 100ms of inactivity (scanner is very fast)
-        barcodeTimeout.current = setTimeout(() => {
-          barcodeBuffer.current = "";
-        }, 100);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      if (barcodeTimeout.current) {
-        clearTimeout(barcodeTimeout.current);
-      }
-    };
-  }, [handleScan]);
-
-  // Handle customer scan
-  const handleCustomerScan = useCallback(
-    async (barcode: string) => {
-      if (!barcode.trim()) return;
-
-      try {
-        const response = await fetch(`/api/scan/customer/${encodeURIComponent(barcode)}`);
-        if (response.ok) {
-          const customer: Customer = await response.json();
-          setLinkedCustomer(customer);
-          toast({
-            title: "Customer Linked",
-            description: `${customer.name} linked to this sale`,
-          });
-        } else {
-          toast({
-            title: "Customer Not Found",
-            description: `No customer found with barcode: ${barcode}`,
-            variant: "destructive",
-          });
-        }
-      } catch (error) {
-        toast({
-          title: "Scan Error",
-          description: "Failed to scan customer",
-          variant: "destructive",
-        });
-      }
-      setCustomerScanInput("");
-    },
-    [setLinkedCustomer, toast]
-  );
-
-  // Complete sale mutation
-  const completeSaleMutation = useMutation({
-    mutationFn: async (paymentMethod: "cash" | "card" | "credit") => {
-      if (items.length === 0) throw new Error("Cart is empty");
-      if (paymentMethod === "credit" && !linkedCustomer) {
-        throw new Error("Credit payment requires a linked customer");
-      }
-
-      const saleItems: SaleItem[] = items.map((item) => ({
-        productId: item.productId,
-        productName: item.productName,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        total: item.total,
-      }));
-
-      const saleData: InsertSale = {
-        items: saleItems,
-        subtotal: getSubtotal(),
-        discount: discount,
-        tax: getTax(),
-        total: getTotal(),
-        paymentMethod,
-        customerId: linkedCustomer?.id,
-        storeId: "store-001",
-        timestamp: new Date().toISOString(),
-        createdBy: currentShift?.staffName || currentStaff?.name || "Unknown",
-      };
-
-      return apiRequest("POST", "/api/sales/complete", saleData);
-    },
-    onSuccess: (_, paymentMethod) => {
-      toast({
-        title: "Sale Completed",
-        description: `Payment received via ${paymentMethod}`,
-      });
-      clearCart();
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/credit-ledger"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/summary"] });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Sale Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
   });
 
-  const handlePayment = (method: "cash" | "card" | "credit") => {
-    // Validate credit payment
-    if (method === "credit") {
-      if (!linkedCustomer) {
+  // Fetch customers
+  const { data: customers = [] } = useQuery<Customer[]>({
+    queryKey: ['customers'],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/customers`);
+      if (!response.ok) throw new Error('Failed to fetch customers');
+      return response.json();
+    }
+  });
+
+  // Fetch recent sales
+  const { data: sales = [], isLoading: salesLoading } = useQuery<Sale[]>({
+    queryKey: ['sales'],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/sales`);
+      if (!response.ok) throw new Error('Failed to fetch sales');
+      return response.json();
+    }
+  });
+
+  // Complete sale mutation with graceful degradation
+  const completeSaleMutation = useMutation({
+    mutationFn: async (saleData: {
+      items: Array<{
+        productId: string;
+        productName: string;
+        quantity: number;
+        unitPrice: number;
+        total: number;
+      }>;
+      subtotal: number;
+      discount: number;
+      tax: number;
+      total: number;
+      paymentMethod: string;
+      paymentStatus: string;
+      customerId?: string;
+      paymentSlipUrl?: string;
+      timestamp: string;
+    }) => {
+      const response = await fetch(`${API_BASE_URL}/api/sales/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(saleData)
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch((error: any) => ({}));
+        throw new Error(errorData.error || 'Failed to complete sale');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      // Save last sale data for reprinting (BEFORE clearing cart)
+      setLastSaleData({
+        cartItems: [...cart],
+        total: getTotal(),
+        paymentMethod: paymentMethod,
+        amountReceived: amountReceived,
+        timestamp: new Date().toISOString(),
+      });
+      setLastSaleId(data.id || '');
+
+      // Show print preview dialog instead of printing immediately
+      setShowPrintPreview(true);
+
+      // Clear the cart state
+      clearCart();
+      // Reset the 'Amount Received' input
+      setAmountReceived(0);
+      // Reset payment method and customer
+      setPaymentMethod('');
+      setSelectedCustomer('');
+      setCapturedImage('');
+      setPaymentSlipUrl('');
+
+      // Show success toast
+      toast({ title: "Sale Completed", description: "Review your receipt before printing" });
+    },
+    onError: (error: any) => {
+      console.error('Sale completion error:', error);
+      
+      // Extract error code and message from backend if available
+      const errorCode = error.code;
+      const errorMessage = error.message || 'Failed to complete sale';
+      
+      // Check for specific error types from backend
+      if (errorCode === 'INSUFFICIENT_STOCK') {
+        toast({
+          title: "Stock Issue",
+          description: "Not enough stock for one or more items. Please check inventory levels.",
+          variant: "destructive",
+        });
+      } else if (errorCode === 'PRODUCT_NOT_FOUND') {
+        toast({
+          title: "Product Error",
+          description: "One or more products in cart not found. Please refresh and try again.",
+          variant: "destructive",
+        });
+      } else if (errorCode === 'CUSTOMER_NOT_FOUND') {
+        toast({
+          title: "Customer Error",
+          description: "Selected customer not found. Please choose a different customer.",
+          variant: "destructive",
+        });
+      } else if (errorCode === 'CUSTOMER_REQUIRED') {
         toast({
           title: "Customer Required",
-          description: "Please link a customer before using credit payment",
+          description: "A customer is required for credit sales. Please select a customer.",
           variant: "destructive",
         });
-        return;
-      }
-      // Check if sale exceeds credit limit
-      const newBalance = linkedCustomer.currentBalance + getTotal();
-      if (linkedCustomer.creditLimit > 0 && newBalance > linkedCustomer.creditLimit) {
+      } else if (errorCode === 'CREDIT_LIMIT_EXCEEDED') {
         toast({
           title: "Credit Limit Exceeded",
-          description: `This sale would exceed ${linkedCustomer.name}'s credit limit`,
+          description: "Customer has exceeded their credit limit. Please use a different payment method.",
+          variant: "destructive",
+        });
+      } else if (errorMessage.includes('stock') || errorMessage.includes('inventory')) {
+        toast({
+          title: "Stock Issue",
+          description: "Not enough stock for one or more items. Please check inventory.",
+          variant: "destructive",
+        });
+      } else if (errorMessage.includes('Invalid sale data')) {
+        toast({
+          title: "Data Error",
+          description: "Invalid sale data. Please try again.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: errorMessage || "Failed to complete sale. Please try again.",
+          variant: "destructive",
+        });
+      }
+    }
+  });
+
+  // QR Scanner callback
+  const handleScanSuccess = useCallback((decodedText: string) => {
+    console.log('🔍 Sales: Barcode scanned:', decodedText);
+
+    // PRIORITY 1: Check if this is a Customer Member Card (starts with "C-" or matches customer data)
+    if (isCustomerCode(decodedText)) {
+      const foundCustomer = customers.find(c =>
+        c.memberId?.toUpperCase() === decodedText.toUpperCase() ||
+        c.barcode === decodedText ||
+        c.phone === decodedText ||
+        c.id === decodedText
+      );
+
+      if (foundCustomer) {
+        // Customer card scanned - link to current sale
+        setSelectedCustomer(foundCustomer.id);
+
+        // Format credit/debt display
+        const creditDisplay = (foundCustomer.currentBalance ?? 0) > 0
+          ? `Debt: ${formatCurrency(foundCustomer.currentBalance ?? 0)}`
+          : 'No Outstanding Debt';
+
+        toast({
+          title: `👤 Customer Linked: ${foundCustomer.name}`,
+          description: creditDisplay,
+        });
+
+        console.log('✅ Customer linked:', foundCustomer.name);
+        return; // STOP - Do not search for product
+      } else {
+        toast({
+          title: "Customer Not Found",
+          description: `No customer found with code: ${decodedText}`,
           variant: "destructive",
         });
         return;
       }
     }
-    completeSaleMutation.mutate(method);
+
+    // PRIORITY 2: Find product by barcode (normal product scan)
+    const product = products.find(p => p.barcode === decodedText);
+    if (product) {
+      if (product.stock > 0) {
+        addToCart(product);
+        toast({
+          title: "Product Added",
+          description: `${product.name} added to cart`,
+        });
+      } else {
+        toast({
+          title: "Out of Stock",
+          description: `${product.name} is out of stock`,
+          variant: "destructive",
+        });
+      }
+    } else {
+      toast({
+        title: "Product Not Found",
+        description: `No product found with barcode: ${decodedText}`,
+        variant: "destructive",
+      });
+    }
+  }, [products, customers, toast, setSelectedCustomer]);
+
+
+  // Cart functions
+  const addToCart = (product: Product) => {
+    setCart(prev => {
+      const existing = prev.find(item => item.id === product.id);
+      if (existing) {
+        return prev.map(item =>
+          item.id === product.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+      return [...prev, { ...product, quantity: 1 }];
+    });
   };
 
-  // Show shift required block if no one is clocked in
-  if (!shiftLoading && (!currentShift || !currentShift.isActive)) {
-    return (
-      <div className="flex flex-col h-full items-center justify-center p-4">
-        <Card className="max-w-md w-full">
-          <CardContent className="pt-6">
-            <div className="flex flex-col items-center gap-6 text-center">
-              <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                <Clock className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <div className="space-y-2">
-                <h2 className="text-xl font-semibold">No Active Shift</h2>
-                <p className="text-sm text-muted-foreground">
-                  A staff member must clock in before processing sales. 
-                  Use the button below to start a shift.
-                </p>
-              </div>
-              <ShiftButton />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const updateQuantity = (id: string, quantity: number) => {
+    if (quantity <= 0) {
+      removeFromCart(id);
+      return;
+    }
+    setCart(prev => prev.map(item =>
+      item.id === id ? { ...item, quantity } : item
+    ));
+  };
+
+  const removeFromCart = (id: string) => {
+    setCart(prev => prev.filter(item => item.id !== id));
+  };
+
+  const getTotal = () => {
+    return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+  };
+
+  // Callback for CartSection to call after printing receipt
+  const handleAfterPrint = () => {
+    console.log('🖨️ Print completed, clearing cart...');
+    // Clear cart and reset form
+    setCart([]);
+    setSelectedCustomer('');
+    setPaymentMethod('');
+    setAmountReceived(0);
+    setCapturedImage('');
+    setPaymentSlipUrl('');
+  };
+
+  // Camera functions
+  const startCamera = async () => {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } 
+      });
+      setStream(mediaStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
+    } catch (error) {
+      console.error('Error accessing camera:', error);
+      toast({
+        title: "Camera Error",
+        description: "Unable to access camera. Please check permissions.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const context = canvasRef.current.getContext('2d');
+      if (context) {
+        canvasRef.current.width = videoRef.current.videoWidth;
+        canvasRef.current.height = videoRef.current.videoHeight;
+        context.drawImage(videoRef.current, 0, 0);
+        const imageData = canvasRef.current.toDataURL('image/jpeg');
+        setCapturedImage(imageData);
+        stopCamera();
+      }
+    }
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setCapturedImage(result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const uploadPaymentSlip = async (imageData: string) => {
+    try {
+      const response = await fetch(imageData);
+      const blob = await response.blob();
+      const formData = new FormData();
+      formData.append('image', blob, 'payment-slip.jpg');
+
+      const uploadResponse = await fetch(`${API_BASE_URL}/api/upload`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!uploadResponse.ok) throw new Error('Upload failed');
+
+      const uploadResult = await uploadResponse.json();
+      setPaymentSlipUrl(uploadResult.url);
+      return uploadResult.url;
+    } catch (error) {
+      console.error('Upload error:', error);
+      throw error;
+    }
+  };
+
+  // Scanner functions
+  const startScanner = () => {
+    setShowScanner(true);
+    
+    setTimeout(() => {
+      const scannerInstance = new Html5QrcodeScanner(
+        "qr-reader",
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+          supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+        },
+        false
+      );
+
+      scannerInstance.render(
+        (decodedText) => {
+          // On successful scan
+          console.log('Scanned barcode:', decodedText);
+          findAndAddProductByBarcode(decodedText);
+          stopScanner();
+        },
+        (errorMessage) => {
+          // On scan failure (ignore continuous errors)
+          console.debug('Scan error:', errorMessage);
+        }
+      );
+
+      scannerRef.current = scannerInstance;
+      setScanner(scannerInstance);
+    }, 100);
+  };
+
+  const stopScanner = () => {
+    if (scannerRef.current) {
+      scannerRef.current.clear().catch((error: any) => {
+        console.error('Failed to clear scanner:', error);
+      });
+      scannerRef.current = null;
+      setScanner(null);
+    }
+    setShowScanner(false);
+  };
+
+  const findAndAddProductByBarcode = (barcode: string) => {
+    // PRIORITY 1: Check if this is a Customer Member Card (starts with "C-")
+    if (isCustomerCode(barcode)) {
+      const foundCustomer = customers.find(c =>
+        c.memberId?.toUpperCase() === barcode.toUpperCase() ||
+        c.barcode === barcode ||
+        c.phone === barcode ||
+        c.id === barcode
+      );
+
+      if (foundCustomer) {
+        // Customer card scanned - link to current sale
+        setSelectedCustomer(foundCustomer.id);
+
+        // Format credit/debt display
+        const creditDisplay = (foundCustomer.currentBalance ?? 0) > 0
+          ? `Debt: ${formatCurrency(foundCustomer.currentBalance ?? 0)}`
+          : 'No Outstanding Debt';
+
+        toast({
+          title: `👤 Customer Linked: ${foundCustomer.name}`,
+          description: creditDisplay,
+        });
+
+        console.log('✅ Customer linked:', foundCustomer.name);
+        return; // STOP - Do not search for product
+      } else {
+        toast({
+          title: "Customer Not Found",
+          description: `No customer found with code: ${barcode}`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    // PRIORITY 2: Find product by barcode (normal product scan)
+    const product = products.find(p => p.barcode === barcode);
+
+    if (product) {
+      if (product.stock > 0) {
+        addToCart(product);
+        toast({
+          title: "Product Added",
+          description: `${product.name} has been added to cart.`,
+        });
+      } else {
+        toast({
+          title: "Out of Stock",
+          description: `${product.name} is currently out of stock.`,
+          variant: "destructive",
+        });
+      }
+    } else {
+      toast({
+        title: "Product Not Found",
+        description: `No product found with barcode: ${barcode}`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const completeSale = async () => {
+    if (cart.length === 0) {
+      toast({
+        title: "Cart is empty",
+        description: "Please add items to the cart before completing the sale.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!paymentMethod) {
+      toast({
+        title: "Payment method required",
+        description: "Please select a payment method.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Credit validation: require customer selection
+    if (paymentMethod === 'credit' && !selectedCustomer) {
+      toast({
+        title: "Customer Required",
+        description: "Please select a customer for credit sales.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      let slipUrl = '';
+      
+      // If mobile payment and slip is captured, upload it with graceful degradation
+      if (paymentMethod === 'mobile' && capturedImage) {
+        try {
+          slipUrl = await uploadPaymentSlip(capturedImage);
+        } catch (uploadError) {
+          console.error('Upload failed, proceeding without slip:', uploadError);
+          // Graceful degradation: continue with sale even if upload fails
+          toast({
+            title: "Upload Warning",
+            description: "Payment slip upload failed, but sale will proceed.",
+            variant: "default",
+          });
+        }
+      }
+
+      // If credit payment and slip is captured (I.O.U. or credit note), upload it
+      if (paymentMethod === 'credit' && capturedImage) {
+        try {
+          slipUrl = await uploadPaymentSlip(capturedImage);
+        } catch (uploadError) {
+          console.error('Credit slip upload failed, proceeding without slip:', uploadError);
+          // Graceful degradation: continue with sale even if AI analysis fails
+          toast({
+            title: "Credit Note Warning",
+            description: "Credit note upload failed, but sale will proceed.",
+            variant: "default",
+          });
+        }
+      }
+
+      // Transform cart items to match backend schema
+      const saleItems = cart.map(item => ({
+        productId: item.id,
+        productName: item.name,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        total: item.price * item.quantity
+      }));
+
+      const saleData = {
+        items: saleItems,
+        subtotal: getTotal(), // Add required subtotal field
+        discount: 0, // Add required discount field
+        tax: 0, // Add required tax field
+        total: getTotal(),
+        paymentMethod,
+        paymentStatus: paymentMethod === 'credit' ? 'unpaid' : 'paid', // Add payment status
+        customerId: selectedCustomer || undefined,
+        paymentSlipUrl: slipUrl || undefined,
+        timestamp: new Date().toISOString() // Add required timestamp
+      };
+
+      console.log('🛒 Sending sale data:', saleData);
+
+      // Complete the sale with or without slip
+      await completeSaleMutation.mutateAsync(saleData);
+
+      setShowCameraModal(false);
+      setCapturedImage('');
+      
+    } catch (error) {
+      console.error('Sale completion error:', error);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopCamera();
+      stopScanner();
+    };
+  }, []);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Shift Status Bar */}
-      <div className="flex items-center justify-between gap-4 px-3 py-2 md:px-4 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200 dark:border-emerald-800">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-            {currentShift?.staffName} on shift
-          </span>
-        </div>
-        <ShiftButton />
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Sales</h1>
+        {lastSaleData && (
+          <Button
+            onClick={handlePrint}
+            variant="outline"
+            className="flex items-center gap-2"
+          >
+            <Printer className="w-4 h-4" />
+            Reprint Last Receipt
+          </Button>
+        )}
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col lg:flex-row gap-3 p-3 md:p-4 overflow-hidden">
-        {/* Left: Product Grid */}
-        <div className="flex-1 flex flex-col min-h-0">
-          {/* Scan Input */}
-          <div className="flex gap-2 mb-3">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Scan product barcode..."
-                value={scanInput}
-                onChange={(e) => setScanInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleScan(scanInput);
-                }}
-                className="pl-10"
-                data-testid="input-product-scan"
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="new-sale">New Sale</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="new-sale" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Product Grid */}
+            <div className="lg:col-span-2">
+              <SalesGrid
+                products={products}
+                productsLoading={productsLoading}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                onScanSuccess={handleScanSuccess}
+                addToCart={addToCart}
               />
             </div>
-            <Button onClick={() => handleScan(scanInput)} data-testid="button-scan-product">
-              Scan
-            </Button>
-          </div>
 
-          {/* Product Grid */}
-          <Card className="flex-1 overflow-hidden">
-            <CardHeader className="p-3">
-              <CardTitle className="text-sm font-medium">Quick Add Products</CardTitle>
-            </CardHeader>
-            <CardContent className="p-3 pt-0 overflow-auto max-h-[calc(100%-3rem)]">
-              {productsLoading ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {[1, 2, 3, 4, 5, 6].map((i) => (
-                    <Skeleton key={i} className="h-20" />
-                  ))}
-                </div>
-              ) : products && products.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {products.map((product) => {
-                    const isRecentlyScanned = lastScannedProduct === product.barcode;
-                    return (
-                    <Button
-                      key={product.id}
-                      variant="outline"
-                      className={`h-auto py-3 px-3 flex flex-col items-start gap-1 text-left transition-all ${isRecentlyScanned ? "ring-2 ring-emerald-500 bg-emerald-50 dark:bg-emerald-950" : ""}`}
-                      onClick={() => {
-                        addItem(product, 1);
-                        setLastScannedProduct(product.barcode || null);
-                        setTimeout(() => setLastScannedProduct(null), 2000);
-                        if (product.stock < 5) {
-                          addAlert({
-                            type: "tip",
-                            message: `Low stock! ${product.name} has only ${product.stock} units. Remind owner to restock soon.`,
-                          });
-                        }
-                      }}
-                      data-testid={`button-product-${product.id}`}
-                    >
-                      <span className="text-xs font-medium line-clamp-2">{product.name}</span>
-                      <div className="flex items-center justify-between w-full gap-2">
-                        <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
-                          {formatCurrency(product.price)}
-                        </span>
-                        {product.stock < 5 && (
-                          <Badge variant="secondary" className="text-[9px]">
-                            Low
-                          </Badge>
-                        )}
-                      </div>
-                    </Button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground text-sm">
-                  No products available
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Right: Cart & Payment */}
-        <div className="w-full lg:w-80 xl:w-96 flex flex-col gap-3 min-h-0">
-          {/* Customer Association */}
-          <Card>
-            <CardHeader className="p-3 pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <User className="w-4 h-4" />
-                Customer
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              {linkedCustomer ? (
-                <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-muted/50">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{linkedCustomer.name}</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      Balance: {formatCurrency(linkedCustomer.currentBalance)} / Limit: {formatCurrency(linkedCustomer.creditLimit)}
-                    </p>
-                  </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => setLinkedCustomer(null)}
-                    data-testid="button-remove-customer"
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Scan customer barcode..."
-                    value={customerScanInput}
-                    onChange={(e) => setCustomerScanInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleCustomerScan(customerScanInput);
-                    }}
-                    className="text-sm"
-                    data-testid="input-customer-scan"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => handleCustomerScan(customerScanInput)}
-                    data-testid="button-scan-customer"
-                  >
-                    Link
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Cart */}
-          <Card className="flex-1 overflow-hidden flex flex-col min-h-0">
-            <CardHeader className="p-3 pb-2">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <ShoppingCart className="w-4 h-4" />
-                  Cart ({getItemCount()})
-                </CardTitle>
-                {items.length > 0 && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={clearCart}
-                    className="text-destructive"
-                    data-testid="button-clear-cart"
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="p-3 pt-0 flex-1 overflow-auto">
-              {items.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-sm">
-                  Cart is empty
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {items.map((item) => (
-                    <div
-                      key={item.productId}
-                      className="flex items-center gap-2 p-2 rounded-lg bg-muted/30"
-                      data-testid={`cart-item-${item.productId}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{item.productName}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {formatCurrency(item.unitPrice)} each
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-7 w-7"
-                          onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                          data-testid={`button-decrease-${item.productId}`}
-                        >
-                          <Minus className="w-3 h-3" />
-                        </Button>
-                        <span className="w-6 text-center text-sm font-medium tabular-nums">
-                          {item.quantity}
-                        </span>
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-7 w-7"
-                          onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                          data-testid={`button-increase-${item.productId}`}
-                        >
-                          <Plus className="w-3 h-3" />
-                        </Button>
-                      </div>
-                      <span className="text-sm font-bold tabular-nums min-w-[60px] text-right">
-                        {formatCurrency(item.total)}
-                      </span>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => removeItem(item.productId)}
-                        data-testid={`button-remove-${item.productId}`}
-                      >
-                        <Trash2 className="w-4 h-4 text-destructive" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Totals & Payment */}
-          <Card>
-            <CardContent className="p-3 space-y-3">
-              {/* Totals */}
-              <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span className="tabular-nums">{formatCurrency(getSubtotal())}</span>
-                </div>
-                {discount > 0 && (
-                  <div className="flex justify-between text-emerald-600">
-                    <span>Discount</span>
-                    <span className="tabular-nums">-{formatCurrency(discount)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Tax (8%)</span>
-                  <span className="tabular-nums">{formatCurrency(getTax())}</span>
-                </div>
-                <div className="flex justify-between text-lg font-bold pt-2 border-t">
-                  <span>Total</span>
-                  <span className="tabular-nums text-indigo-600 dark:text-indigo-400">
-                    {formatCurrency(getTotal())}
-                  </span>
-                </div>
-              </div>
-
-              {/* Payment Buttons */}
-              <div className="grid grid-cols-3 gap-2">
-                <Button
-                  className="h-14 flex-col gap-1 bg-emerald-600 hover:bg-emerald-700"
-                  onClick={() => handlePayment("cash")}
-                  disabled={items.length === 0 || completeSaleMutation.isPending}
-                  data-testid="button-pay-cash"
-                >
-                  <Banknote className="w-5 h-5" />
-                  <span className="text-xs">Cash</span>
-                </Button>
-                <Button
-                  className="h-14 flex-col gap-1 bg-indigo-600 hover:bg-indigo-700"
-                  onClick={() => handlePayment("card")}
-                  disabled={items.length === 0 || completeSaleMutation.isPending}
-                  data-testid="button-pay-card"
-                >
-                  <Smartphone className="w-5 h-5" />
-                  <span className="text-xs">Mobile</span>
-                </Button>
-                <Button
-                  className="h-14 flex-col gap-1 bg-amber-600 hover:bg-amber-700"
-                  onClick={() => handlePayment("credit")}
-                  disabled={items.length === 0 || !linkedCustomer || completeSaleMutation.isPending}
-                  data-testid="button-pay-credit"
-                >
-                  <CreditCard className="w-5 h-5" />
-                  <span className="text-xs">Credit</span>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* AI Suggestion Box - Fixed at bottom */}
-      {alerts.length > 0 && (
-        <div className="border-t bg-background p-3 md:p-4" data-testid="ai-suggestions-box">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-indigo-500" />
+            {/* Cart */}
+            <div>
+              <CartSection
+                cart={cart}
+                customers={customers}
+                selectedCustomer={selectedCustomer}
+                setSelectedCustomer={setSelectedCustomer}
+                paymentMethod={paymentMethod}
+                setPaymentMethod={setPaymentMethod}
+                updateQuantity={updateQuantity}
+                removeFromCart={removeFromCart}
+                getTotal={getTotal}
+                completeSale={completeSale}
+                completeSaleMutation={completeSaleMutation}
+                showMobilePayment={showMobilePayment}
+                setShowMobilePayment={setShowMobilePayment}
+                showCameraModal={showCameraModal}
+                setShowCameraModal={setShowCameraModal}
+                lastSaleId={lastSaleId}
+                lastSaleTotal={lastSaleTotal}
+                paymentSlipUrl={paymentSlipUrl}
+                amountReceived={amountReceived}
+                setAmountReceived={setAmountReceived}
+                onAfterPrint={handleAfterPrint}
+                onScanCustomerClick={() => setIsCustomerScannerOpen(true)}
+              />
             </div>
-            <div className="flex-1 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">AI Suggestions</p>
-              {alerts.map((alert, index) => (
-                <div
-                  key={index}
-                  className={`flex items-start gap-2 p-2 rounded-lg text-sm ${
-                    alert.type === "warning"
-                      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                      : alert.type === "tip"
-                      ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400"
-                      : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  }`}
-                  data-testid={`alert-${alert.type}-${index}`}
-                >
-                  {alert.type === "warning" ? (
-                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  ) : alert.type === "tip" ? (
-                    <Lightbulb className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  ) : (
-                    <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  )}
-                  <span>{alert.message}</span>
-                </div>
-              ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="history">
+          <SalesHistory
+            sales={sales}
+            salesLoading={salesLoading}
+          />
+        </TabsContent>
+      </Tabs>
+
+      <MobileScanner
+        isOpen={isCustomerScannerOpen}
+        onClose={() => setIsCustomerScannerOpen(false)}
+        onScanSuccess={handleCustomerScanSuccess}
+      />
+
+      {/* Mobile Payment QR Code Dialog */}
+      <Dialog open={showMobilePayment} onOpenChange={setShowMobilePayment}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mobile Payment</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-center">
+              <div className="w-48 h-48 mx-auto bg-gray-100 rounded-lg flex items-center justify-center">
+                <Smartphone className="w-16 h-16 text-gray-400" />
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Scan the QR code to complete payment
+              </p>
             </div>
             <Button
-              size="icon"
-              variant="ghost"
-              onClick={clearAlerts}
-              className="flex-shrink-0"
-              data-testid="button-dismiss-alerts"
+              onClick={() => {
+                setShowMobilePayment(false);
+                setShowCameraModal(true);
+              }}
+              className="w-full"
             >
-              <X className="w-4 h-4" />
+              <Camera className="w-4 h-4 mr-2" />
+              Capture Payment Slip
             </Button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Camera Modal */}
+      <Dialog open={showCameraModal} onOpenChange={setShowCameraModal}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {paymentMethod === 'credit' ? 'Capture Credit Note (I.O.U.)' : 'Capture Payment Slip'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {!capturedImage ? (
+              <div className="space-y-4">
+                <div className="relative">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    className="w-full rounded-lg"
+                  />
+                  <canvas ref={canvasRef} className="hidden" />
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={startCamera} className="flex-1">
+                    <Camera className="w-4 h-4 mr-2" />
+                    Start Camera
+                  </Button>
+                  <Button onClick={capturePhoto} className="flex-1">
+                    <Camera className="w-4 h-4 mr-2" />
+                    Capture
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1"
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload
+                  </Button>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <img
+                  src={capturedImage}
+                  alt="Captured payment slip"
+                  className="w-full rounded-lg"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setCapturedImage('');
+                      startCamera();
+                    }}
+                    className="flex-1"
+                  >
+                    Retake
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setShowCameraModal(false);
+                      completeSale();
+                    }}
+                    className="flex-1"
+                  >
+                    Complete Sale
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Print Preview Dialog */}
+      <Dialog open={showPrintPreview} onOpenChange={setShowPrintPreview}>
+        <DialogContent className="max-w-md print:max-w-full">
+          <DialogHeader className="print:hidden">
+            <DialogTitle className="text-black dark:text-white">Receipt Preview</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Thermal Receipt Preview - 80mm width optimized */}
+            <div id="receipt-content" className="mx-auto w-[300px] print:w-[80mm] bg-white p-4 print:p-0 border print:border-0 rounded print:rounded-none shadow print:shadow-none">
+              {lastSaleData && (
+                <div className="text-black font-mono text-sm print:text-[12px]">
+                  {/* Header - Store Info */}
+                  <div className="text-center border-b-2 border-dashed border-black pb-2 mb-2">
+                    <h1 className="font-bold text-xl print:text-[18px] tracking-wide">AGART POS</h1>
+                    <p className="text-[11px] print:text-[10px] mt-1">No. 123, Main Street, Yangon</p>
+                    <p className="text-[11px] print:text-[10px]">Tel: 09-123-456-789</p>
+                  </div>
+
+                  {/* Receipt Info */}
+                  <div className="text-[11px] print:text-[10px] mb-2 space-y-0.5">
+                    <div className="flex justify-between">
+                      <span>Receipt #:</span>
+                      <span className="font-semibold">{lastSaleId.substring(0, 8).toUpperCase()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Date:</span>
+                      <span>{new Date(lastSaleData.timestamp).toLocaleDateString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Time:</span>
+                      <span>{new Date(lastSaleData.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Payment:</span>
+                      <span className="font-semibold">{lastSaleData.paymentMethod.toUpperCase()}</span>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="border-t-2 border-dashed border-black my-2"></div>
+
+                  {/* Items Table */}
+                  <div className="mb-2">
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-1 text-[11px] print:text-[10px] font-bold mb-1">
+                      <div>Item</div>
+                      <div className="text-center w-8">Qty</div>
+                      <div className="text-right w-16">Price</div>
+                      <div className="text-right w-20">Amount</div>
+                    </div>
+                    <div className="border-t border-black pt-1">
+                      {lastSaleData.cartItems.map((item, index) => (
+                        <div key={index} className="grid grid-cols-[1fr_auto_auto_auto] gap-1 text-[11px] print:text-[10px] py-0.5">
+                          <div className="truncate">{item.name}</div>
+                          <div className="text-center w-8">{item.quantity}</div>
+                          <div className="text-right w-16">{formatCurrency(item.price)}</div>
+                          <div className="text-right w-20 font-semibold">{formatCurrency(item.price * item.quantity)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="border-t-2 border-dashed border-black my-2"></div>
+
+                  {/* Totals Section */}
+                  <div className="space-y-1 text-[12px] print:text-[11px]">
+                    <div className="flex justify-between">
+                      <span>Subtotal:</span>
+                      <span className="font-mono">{formatCurrency(lastSaleData.total)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Tax (0%):</span>
+                      <span className="font-mono">{formatCurrency(0)}</span>
+                    </div>
+                    <div className="border-t-2 border-black pt-1 mt-1"></div>
+                    <div className="flex justify-between font-bold text-[14px] print:text-[13px]">
+                      <span>GRAND TOTAL:</span>
+                      <span className="font-mono">{formatCurrency(lastSaleData.total)}</span>
+                    </div>
+                    {lastSaleData.amountReceived > 0 && (
+                      <>
+                        <div className="flex justify-between text-[11px] print:text-[10px] mt-2">
+                          <span>Amount Received:</span>
+                          <span className="font-mono">{formatCurrency(lastSaleData.amountReceived)}</span>
+                        </div>
+                        <div className="flex justify-between font-semibold">
+                          <span>Change:</span>
+                          <span className="font-mono">{formatCurrency(lastSaleData.amountReceived - lastSaleData.total)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Divider */}
+                  <div className="border-t-2 border-dashed border-black my-2"></div>
+
+                  {/* Footer */}
+                  <div className="text-center text-[11px] print:text-[10px] space-y-1">
+                    <p className="font-bold">Thank You!</p>
+                    <p className="myanmar-text">ကျေးဇူးတင်ပါသည်၊</p>
+                    <p className="myanmar-text">နောက်လည်း ကြွခဲ့ပါဦး။</p>
+                    <div className="mt-2 pt-2 border-t border-dashed border-gray-400">
+                      <p className="text-[10px] print:text-[9px]">Facebook: fb.com/agartpos</p>
+                      <p className="text-[10px] print:text-[9px] text-gray-600 mt-1">Powered by AGART POS System</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons - Hidden on Print */}
+            <div className="flex gap-2 print:hidden">
+              <Button
+                variant="outline"
+                onClick={() => setShowPrintPreview(false)}
+                className="flex-1"
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  handlePrint();
+                  setShowPrintPreview(false);
+                }}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Printer className="w-4 h-4 mr-2" />
+                Print Now
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #receipt-content,
+          #receipt-content * {
+            visibility: visible;
+          }
+          #receipt-content {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 80mm;
+            margin: 0;
+            padding: 0;
+          }
+          .myanmar-text {
+            font-family: 'Myanmar Text', 'Padauk', sans-serif;
+          }
+        }
+      `}</style>
+
+      <div style={{ display: "none" }}>
+        {/* Render receipt with lastSaleData if available, otherwise use current cart */}
+        {(lastSaleData || cart.length > 0) && (
+          <ReceiptTemplate
+            ref={componentRef}
+            cartItems={(lastSaleData?.cartItems || cart).map(item => ({
+              name: item.name,
+              quantity: item.quantity,
+              price: item.price,
+              total: item.price * item.quantity
+            }))}
+            total={lastSaleData?.total || getTotal()}
+            discount={0}
+            paymentMethod={lastSaleData?.paymentMethod || paymentMethod}
+            date={lastSaleData?.timestamp || new Date().toISOString()}
+            orderId={lastSaleId || ''}
+            amountGiven={lastSaleData?.amountReceived || amountReceived}
+            change={(lastSaleData?.amountReceived || amountReceived) - (lastSaleData?.total || getTotal())}
+          />
+        )}
+      </div>
     </div>
   );
 }
