@@ -60,9 +60,9 @@ export type Staff = {
   id: string;
   name: string;
   pin: string;
-  role: "cashier" | "manager" | "admin";
+  role: "cashier" | "manager" | "owner";
   barcode?: string | undefined;
-  suspended: boolean;
+  status: "active" | "suspended";
   createdAt: string;
   updatedAt: string;
 };
@@ -71,7 +71,7 @@ export type Attendance = {
   id: string;
   staffId: string;
   staffName: string;
-  clockIn: string;
+  clockInTime: string;
   clockOut?: string | undefined;
 };
 
@@ -86,7 +86,7 @@ export type InventoryLog = {
   id: string;
   productId: string;
   productName: string;
-  quantityChange: number;
+  quantityChanged: number;
   reason: string;
   type: "stock-in" | "sale" | "adjustment";
   staffId?: string | undefined;
@@ -146,6 +146,9 @@ export type AppSettings = {
   currencyCode: string;
   currencySymbol: string;
   currencyPosition: "before" | "after";
+  enableLocalAi?: boolean;
+  localAiUrl?: string | null;
+  localAiModel?: string | null;
   updatedAt: string | null;
 };
 
@@ -170,8 +173,8 @@ export type Shift = {
   id: string;
   staffId: string;
   staffName: string;
-  clockIn: string;
-  clockOut?: string | null;
+  startTime: string;
+  endTime?: string | null;
   openingCash: number;
   closingCash?: number | null;
   totalSales: number;
@@ -179,7 +182,6 @@ export type Shift = {
   cardSales: number;
   creditSales: number;
   mobileSales: number;
-  isActive: boolean;
 };
 
 export type InsertShift = Omit<Shift, "id" | "clockOut" | "closingCash" | "totalSales" | "cashSales" | "cardSales" | "creditSales" | "mobileSales" | "isActive">;

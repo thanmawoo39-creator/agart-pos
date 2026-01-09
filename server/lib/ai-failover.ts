@@ -4,12 +4,26 @@
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getGeminiAI, hasGeminiApiKey, getGroqApiKey, hasGroqApiKey } from './gemini-config';
+import { getGeminiAI, hasGeminiApiKey, getGroqApiKey, hasGroqApiKey, isLocalAiEnabled, getLocalAiUrl } from './gemini-config';
+import { callOllamaVisionAPI } from './local-ai';
+import { callGeminiVisionAPI } from './gemini';
 
 // Groq SDK - using fetch for simple API calls
 interface GroqMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+export interface AIResult {
+  success: boolean;
+  data?: any;
+  confidence_score?: number;
+  raw?: string;
+  amount?: number;
+  transactionId?: string;
+  warnings?: string[];
+  isValid?: boolean;
+  provider?: 'gemini' | 'groq' | 'ollama' | 'fallback';
 }
 
 interface GroqCompletionRequest {
@@ -25,6 +39,7 @@ interface GroqCompletionRequest {
  */
 async function callGroqAPI(
   messages: GroqMessage[],
+  model: string, // Accept model as parameter
   stream: boolean = false
 ): Promise<string> {
   const GROQ_API_KEY = await getGroqApiKey();
@@ -43,7 +58,7 @@ async function callGroqAPI(
     },
     body: JSON.stringify({
       messages,
-      model: 'llama-3.3-70b-versatile', // Fast and capable Groq model
+      model: model, // Use the provided model
       temperature: 0.7,
       max_tokens: 2048,
       stream: false,
@@ -67,8 +82,10 @@ export async function generateWithFailover(
   systemPrompt: string,
   userPrompt: string,
   options?: {
-    preferredModel?: 'gemini-1.5-flash' | 'gemini-2.5-pro';
-    skipGemini?: boolean;
+    preferredModel?: 'gemini-1.5-flash' | 'gemini-2.5-pro' | 'llama-3.3-70b-versatile' | 'mixtral-8x7b-32768';
+    preferredProvider?: 'gemini' | 'groq'; // New option to specify preferred provider
+    skipGemini?: boolean; // Keep for explicit skipping
+    skipGroq?: boolean; // New option to skip Groq
   }
 ): Promise<{
   success: boolean;
@@ -76,16 +93,43 @@ export async function generateWithFailover(
   provider: 'gemini' | 'groq' | 'fallback';
   error?: string;
 }> {
-  const model = options?.preferredModel || 'gemini-2.5-pro';
+  const model = options?.preferredModel || 'llama-3.3-70b-versatile'; // Default to a Groq model
+  const preferredProvider = options?.preferredProvider || 'groq'; // Default to Groq
 
-  // Try Gemini first (unless explicitly skipped)
+  // Prioritize based on preferredProvider
+  if (preferredProvider === 'groq' && !options?.skipGroq) {
+    // Try Groq first
+    try {
+      console.log('[AI Failover] Attempting Groq API as primary...');
+
+      const messages: GroqMessage[] = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ];
+
+      const groqResponse = await callGroqAPI(messages, model); // Pass model here
+
+      console.log('[AI Failover] ✓ Groq API succeeded');
+      return {
+        success: true,
+        content: groqResponse,
+        provider: 'groq',
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('[AI Failover] ✗ Groq API failed as primary:', errorMsg);
+      console.log('[AI Failover] Groq primary failed, falling over to Gemini...');
+    }
+  }
+
+  // Then try Gemini (if not skipped and if Groq wasn't preferred or failed)
   if (!options?.skipGemini) {
     try {
       console.log('[AI Failover] Attempting Gemini API...');
 
       if (await hasGeminiApiKey()) {
         const genAI = await getGeminiAI();
-        const geminiModel = genAI.getGenerativeModel({ model });
+        const geminiModel = genAI.getGenerativeModel({ model: options?.preferredModel || 'gemini-1.5-flash' }); // Use Gemini-specific default model
 
         const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
         const result = await geminiModel.generateContent([fullPrompt]);
@@ -98,7 +142,7 @@ export async function generateWithFailover(
           provider: 'gemini',
         };
       } else {
-        console.log('[AI Failover] Gemini API key not configured, trying Groq...');
+        console.log('[AI Failover] Gemini API key not configured, trying Groq or fallback...');
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -112,41 +156,43 @@ export async function generateWithFailover(
         errorMsg.includes('500') ||
         errorMsg.includes('503')
       ) {
-        console.log('[AI Failover] Gemini rate limit/error detected, failing over to Groq...');
+        console.log('[AI Failover] Gemini rate limit/error detected...');
       }
     }
   }
+  
+  // If Groq was preferred but skipped, or Gemini was preferred and failed, try Groq again if not skipped
+  if (preferredProvider === 'gemini' && !options?.skipGroq) {
+      try {
+          console.log('[AI Failover] Attempting Groq API as fallback...');
 
-  // Fallback to Groq
-  try {
-    console.log('[AI Failover] Attempting Groq API as fallback...');
+          const messages: GroqMessage[] = [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+          ];
 
-    const messages: GroqMessage[] = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ];
+          const groqResponse = await callGroqAPI(messages, model);
 
-    const groqResponse = await callGroqAPI(messages);
-
-    console.log('[AI Failover] ✓ Groq API succeeded');
-    return {
-      success: true,
-      content: groqResponse,
-      provider: 'groq',
-    };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('[AI Failover] ✗ Groq API failed:', errorMsg);
-
-    // Final fallback - return generic message
-    console.log('[AI Failover] Both AI services failed, returning fallback message');
-    return {
-      success: false,
-      content: 'AI is currently busy. Please try again in a few moments.',
-      provider: 'fallback',
-      error: errorMsg,
-    };
+          console.log('[AI Failover] ✓ Groq API succeeded');
+          return {
+              success: true,
+              content: groqResponse,
+              provider: 'groq',
+          };
+      } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error('[AI Failover] ✗ Groq API failed:', errorMsg);
+      }
   }
+
+  // Final fallback - return generic message
+  console.log('[AI Failover] All AI services failed, returning fallback message');
+  return {
+    success: false,
+    content: 'AI is currently busy. Please try again in a few moments.',
+    provider: 'fallback',
+    error: 'All configured AI services failed or were unavailable.',
+  };
 }
 
 /**
@@ -158,7 +204,8 @@ export async function generateStreamingWithFailover(
   userPrompt: string,
   onToken: (token: string) => void,
   options?: {
-    preferredModel?: 'gemini-1.5-flash' | 'gemini-2.5-pro';
+    preferredModel?: 'gemini-1.5-flash' | 'gemini-2.5-pro' | 'llama-3.3-70b-versatile' | 'mixtral-8x7b-32768';
+    preferredProvider?: 'gemini' | 'groq'; // New option to specify preferred provider
   }
 ): Promise<{
   success: boolean;
@@ -166,15 +213,44 @@ export async function generateStreamingWithFailover(
   provider: 'gemini' | 'groq' | 'fallback';
   error?: string;
 }> {
-  const model = options?.preferredModel || 'gemini-2.5-pro';
+  const model = options?.preferredModel || 'llama-3.3-70b-versatile'; // Default to a Groq model
+  const preferredProvider = options?.preferredProvider || 'groq'; // Default to Groq
 
-  // Try Gemini streaming first
+  // Prioritize based on preferredProvider
+  if (preferredProvider === 'groq') {
+    // Try Groq first (non-streaming for now as Groq streaming not implemented)
+    try {
+      console.log('[AI Failover] Attempting Groq API as primary (non-streaming)...');
+
+      const messages: GroqMessage[] = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ];
+
+      const groqResponse = await callGroqAPI(messages, model); // Pass model here
+
+      onToken(groqResponse); // Send full response at once
+
+      console.log('[AI Failover] ✓ Groq API succeeded');
+      return {
+        success: true,
+        fullContent: groqResponse,
+        provider: 'groq',
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('[AI Failover] ✗ Groq API failed as primary:', errorMsg);
+      console.log('[AI Failover] Groq primary failed, falling over to Gemini streaming...');
+    }
+  }
+
+  // Then try Gemini streaming
   try {
     console.log('[AI Failover] Attempting Gemini streaming API...');
 
     if (await hasGeminiApiKey()) {
       const genAI = await getGeminiAI();
-      const geminiModel = genAI.getGenerativeModel({ model });
+      const geminiModel = genAI.getGenerativeModel({ model: options?.preferredModel || 'gemini-1.5-flash' }); // Use Gemini-specific default model
 
       const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
       const result = await geminiModel.generateContentStream([fullPrompt]);
@@ -193,48 +269,98 @@ export async function generateStreamingWithFailover(
         provider: 'gemini',
       };
     } else {
-      console.log('[AI Failover] Gemini API key not configured, trying Groq...');
+      console.log('[AI Failover] Gemini API key not configured, trying Groq or fallback...');
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     console.error('[AI Failover] ✗ Gemini streaming failed:', errorMsg);
-    console.log('[AI Failover] Gemini failed, failing over to Groq...');
+    console.log('[AI Failover] Gemini failed, falling over to Groq...');
+  }
+  
+  // If Gemini was preferred but failed, try Groq again if not already tried as primary
+  if (preferredProvider === 'gemini') {
+    try {
+      console.log('[AI Failover] Attempting Groq API as fallback (non-streaming)...');
+
+      const messages: GroqMessage[] = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ];
+
+      const groqResponse = await callGroqAPI(messages, model);
+
+      onToken(groqResponse);
+
+      console.log('[AI Failover] ✓ Groq API succeeded');
+      return {
+        success: true,
+        fullContent: groqResponse,
+        provider: 'groq',
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('[AI Failover] ✗ Groq API failed:', errorMsg);
+    }
   }
 
-  // Fallback to Groq (non-streaming)
+  // Final fallback
+  const fallbackMsg = 'AI is currently busy. Please try again in a few moments.';
+  onToken(fallbackMsg);
+
+  console.log('[AI Failover] All AI services failed, returning fallback message');
+  return {
+    success: false,
+    fullContent: fallbackMsg,
+    provider: 'fallback',
+    error: 'All configured AI services failed or were unavailable.',
+  };
+}
+
+import { isLocalAiEnabled } from './gemini-config';
+import { callOllamaVisionAPI } from './local-ai';
+import { callGeminiVisionAPI, AIResult } from './gemini';
+
+/**
+ * Generate vision-based response with failover
+ * Tries Local AI (Ollama) first, falls back to Gemini on error or if disabled
+ */
+export async function generateVisionWithFailover(
+  imageBuffer: Buffer,
+  mimeType: string,
+  prompt: string
+): Promise<AIResult> {
+  // Try Local AI first if enabled
+  if (await isLocalAiEnabled()) {
+    try {
+      console.log('[AI Failover] Attempting Local AI (Ollama) API...');
+      const localAiResult = await callOllamaVisionAPI(imageBuffer, prompt);
+      if (localAiResult.success) {
+        console.log('[AI Failover] ✓ Local AI (Ollama) API succeeded');
+        return { ...localAiResult, provider: 'ollama' };
+      }
+      console.warn('[AI Failover] ✗ Local AI (Ollama) failed, failing over to Gemini...');
+    } catch (error) {
+      console.error('[AI Failover] ✗ Local AI (Ollama) threw an error:', error);
+    }
+  }
+
+  // Fallback to Gemini
   try {
-    console.log('[AI Failover] Attempting Groq API as fallback...');
-
-    const messages: GroqMessage[] = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ];
-
-    const groqResponse = await callGroqAPI(messages);
-
-    // Send full response at once since Groq streaming isn't implemented
-    onToken(groqResponse);
-
-    console.log('[AI Failover] ✓ Groq API succeeded');
-    return {
-      success: true,
-      fullContent: groqResponse,
-      provider: 'groq',
-    };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error('[AI Failover] ✗ Groq API failed:', errorMsg);
-
-    // Final fallback
-    const fallbackMsg = 'AI is currently busy. Please try again in a few moments.';
-    onToken(fallbackMsg);
-
-    console.log('[AI Failover] Both AI services failed, returning fallback message');
+    console.log('[AI Failover] Attempting Gemini API as fallback...');
+    const geminiResult = await callGeminiVisionAPI(imageBuffer, mimeType, prompt);
+    if (geminiResult.success) {
+      console.log('[AI Failover] ✓ Gemini API succeeded');
+      return { ...geminiResult, provider: 'gemini' };
+    }
+    // Return Gemini's failure response if it didn't throw
+    return { ...geminiResult, provider: 'gemini' };
+  } catch (error: any) {
+    console.error('[AI Failover] ✗ Gemini API failed:', error);
     return {
       success: false,
-      fullContent: fallbackMsg,
+      raw: error.message,
+      warnings: ['Both local AI and Gemini failed.'],
       provider: 'fallback',
-      error: errorMsg,
     };
   }
 }
@@ -242,6 +368,7 @@ export async function generateStreamingWithFailover(
 /**
  * Check if either AI service is available
  */
+
 export async function isAIServiceAvailable(): Promise<{
   gemini: boolean;
   groq: boolean;

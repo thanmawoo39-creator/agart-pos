@@ -1,18 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getGeminiAI, hasGeminiApiKey } from './gemini-config';
-import { generateWithFailover, generateStreamingWithFailover } from './ai-failover';
+import { generateWithFailover, generateStreamingWithFailover, generateVisionWithFailover } from './ai-failover';
 
-// AI Result interface for consistent return types
-export interface AIResult {
-  success: boolean;
-  data?: any;
-  confidence_score?: number;
-  raw?: string;
-  amount?: number;
-  transactionId?: string;
-  warnings?: string[];
-  isValid?: boolean;
-}
 
 // Helper function to prepare base64 image data for Gemini API
 function prepareImageData(imageBuffer: Buffer, mimeType: string) {
@@ -41,95 +30,102 @@ function prepareImageData(imageBuffer: Buffer, mimeType: string) {
   };
 }
 
-// Product identification from image
-export async function identifyGroceryItem(imageBuffer: Buffer, mimeType: string): Promise<AIResult> {
-  try {
-    // Check if API key is configured
-    if (!(await hasGeminiApiKey())) {
-      return {
-        success: false,
-        raw: 'NULL',
-        warnings: ['Gemini API key not configured. Please set it in Settings.']
-      };
-    }
-
-    const genAI = await getGeminiAI();
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
-
-    // Prepare optimized image data (no re-encoding, stripped headers)
-    const imagePart = prepareImageData(imageBuffer, mimeType);
-
-    const prompt = `Analyze this grocery item image and provide a JSON response with the following structure:
-{
-  "name": "exact product name",
-  "category": "produce/dairy/bakery/meat/other",
-  "estimated_price": 0.00,
-  "confidence_score": 0.00,
-  "raw": "raw response text"
+function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-Rules:
-- If image shows a person, face, or non-grocery item, set raw to "NULL" and name to "NOT_FOUND"
-- Be very specific with product names (e.g., "Red Apples" not just "Apples")
-- Estimate realistic prices in MMK (Myanmar Kyat)
-- Confidence score should be 0.0-1.0 based on clarity and match certainty
-- Include the raw response text for debugging`;
+export async function callGeminiVisionAPI(imageBuffer: Buffer, mimeType: string, prompt: string): Promise<AIResult> {
+  let retries = 3;
+  let delayMs = 1000;
 
-    const result = await model.generateContent([prompt, imagePart]);
-    const response = result.response.text();
-    
-    console.log('Gemini grocery identification response:', response);
-
-    // Parse JSON response
-    let parsed;
+  while (retries > 0) {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*?\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
-      } else {
+      const genAI = await getGeminiAI();
+      const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' });
+      const imagePart = prepareImageData(imageBuffer, mimeType);
+
+      const result = await model.generateContent([prompt, imagePart]);
+      const response = result.response.text();
+      
+      console.log('Gemini grocery identification response:', response);
+
+      // Parse JSON response
+      let parsed;
+      try {
+        const jsonMatch = response.match(/\{[\s\S]*?\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          return {
+            success: false,
+            raw: response,
+            warnings: ['Invalid JSON response from Gemini']
+          };
+        }
+      } catch (parseError) {
         return {
           success: false,
           raw: response,
-          warnings: ['Invalid JSON response from Gemini']
+          warnings: ['Failed to parse Gemini response']
         };
       }
-    } catch (parseError) {
+
+      // Validate required fields
+      if (!parsed.name || parsed.name === 'NOT_FOUND') {
+        return {
+          success: false,
+          raw: parsed.raw || response,
+          confidence_score: parsed.confidence_score || 0,
+          warnings: ['Product not identified or not in inventory']
+        };
+      }
+
       return {
-        success: false,
-        raw: response,
-        warnings: ['Failed to parse Gemini response']
+        success: true,
+        data: {
+          name: parsed.name,
+        },
+        confidence_score: parsed.confidence_score || 0.8,
+        raw: parsed.raw || response
       };
+    } catch (error: any) {
+      if (error.message && error.message.includes('429 Too Many Requests')) {
+        console.warn(`Gemini API rate limit hit. Retrying in ${delayMs}ms... (${retries - 1} retries left)`);
+        await delay(delayMs);
+        retries--;
+        delayMs *= 2;
+      } else {
+        // Non-retryable error, re-throw
+        throw error;
+      }
     }
-
-    // Validate required fields
-    if (!parsed.name || parsed.name === 'NOT_FOUND') {
-      return {
-        success: false,
-        raw: parsed.raw || response,
-        confidence_score: parsed.confidence_score || 0,
-        warnings: ['Product not identified or not in inventory']
-      };
-    }
-
-    return {
-      success: true,
-      data: {
-        name: parsed.name,
-        category: parsed.category,
-        estimatedPrice: parsed.estimated_price
-      },
-      confidence_score: parsed.confidence_score || 0.8,
-      raw: parsed.raw || response
-    };
-
-  } catch (error) {
-    console.error('Gemini grocery identification error:', error);
-    return {
-      success: false,
-      raw: error instanceof Error ? error.message : String(error),
-      warnings: ['AI service error']
-    };
   }
+  
+  // If all retries fail, return a failure response
+  return {
+    success: false,
+    raw: 'API rate limit exceeded after multiple retries.',
+    warnings: ['AI service is temporarily unavailable due to high demand. Please try again in a few moments.']
+  };
+}
+
+export async function identifyGroceryItem(imageBuffer: Buffer, mimeType: string): Promise<AIResult> {
+  const prompt = `Analyze this grocery item image to identify the product's name and brand. Your primary goal is to provide a name that can be matched exactly with a product in our inventory list.
+
+Provide a JSON response with the following structure:
+{
+  "name": "exact product name including brand",
+  "confidence_score": 0.00
+}
+
+Rules:
+- Focus on identifying the brand and product name from the packaging.
+- If the image is blurry, dark, or unclear, set name to "NOT_FOUND" and confidence_score to 0.
+- If the image does not contain a product, set name to "NOT_FOUND".
+- The name should be as specific as possible to match an inventory item. For example, instead of "Soda", identify it as "Coca-Cola Classic".
+- Confidence score should be between 0.0 and 1.0, representing how certain you are about the identified name.`;
+
+  return await generateVisionWithFailover(imageBuffer, mimeType, prompt);
 }
 
 // Payment slip verification
@@ -267,11 +263,10 @@ INSTRUCTIONS:
 - Respond in the language of the user's question (English or Myanmar)
 - Keep responses concise (2-4 sentences) but data-driven`;
 
-  const userPrompt = `User Question: ${prompt}`;
-
-  // Use failover system (Gemini → Groq → Fallback)
+  // Use failover system (Groq → Gemini → Fallback)
   const result = await generateWithFailover(systemPrompt, userPrompt, {
-    preferredModel: 'gemini-2.5-pro',
+    preferredProvider: 'groq',
+    preferredModel: 'gemini-3-pro-preview',
   });
 
   return result.content;
@@ -335,9 +330,10 @@ INSTRUCTIONS:
 
   const userPrompt = `User Question: ${prompt}`;
 
-  // Use failover system with streaming (Gemini → Groq → Fallback)
+  // Use failover system with streaming (Groq → Gemini → Fallback)
   const result = await generateStreamingWithFailover(systemPrompt, userPrompt, onToken, {
-    preferredModel: 'gemini-2.5-pro',
+    preferredProvider: 'groq',
+    preferredModel: 'gemini-3-pro-preview',
   });
 
   return result.fullContent;
@@ -351,9 +347,10 @@ Focus on key trends, anomalies, and strategic recommendations.`;
 
   const userPrompt = `${prompt}\n\nReport Data:\n${reportData}`;
 
-  // Use failover system (Gemini → Groq → Fallback)
+  // Use failover system (Groq → Gemini → Fallback)
   const result = await generateWithFailover(systemPrompt, userPrompt, {
-    preferredModel: 'gemini-2.5-pro',
+    preferredProvider: 'groq',
+    preferredModel: 'gemini-3-pro-preview',
   });
 
   return result.content;

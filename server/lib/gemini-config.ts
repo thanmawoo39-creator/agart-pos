@@ -98,9 +98,39 @@ export async function getGroqApiKey(): Promise<string | null> {
 }
 
 /**
+ * Check if Local AI (Ollama) is enabled
+ * @returns true if local AI is enabled in settings, false otherwise
+ */
+export async function isLocalAiEnabled(): Promise<boolean> {
+  try {
+    const settings = await storage.getAppSettings();
+    return settings.enableLocalAi ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get Local AI (Ollama) endpoint URL
+ * @returns URL string or null if not configured
+ */
+export async function getLocalAiUrl(): Promise<string | null> {
+  try {
+    const settings = await storage.getAppSettings();
+    if (settings.localAiUrl && settings.localAiUrl.trim() !== '') {
+      return settings.localAiUrl.trim();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Check if Groq API key is configured
  * @returns true if API key is available, false otherwise
  */
+
 export async function hasGroqApiKey(): Promise<boolean> {
   const key = await getGroqApiKey();
   return key !== null;

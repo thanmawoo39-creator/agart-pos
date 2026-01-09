@@ -1,6 +1,7 @@
 import { type Request, type Response, Router } from 'express';
 import { storage } from '../storage';
 import { identifyGroceryItem } from '../lib/gemini';
+import { callOllamaVisionAPI } from '../lib/local-ai';
 import { type Product } from '@shared/schema';
 import multer from 'multer';
 
@@ -14,33 +15,48 @@ router.post('/recognize', upload.single('image'), async (req: Request, res: Resp
   }
 
   try {
-    const result = await identifyGroceryItem(req.file.buffer, req.file.mimetype);
-    const items = result.success && result.data && result.data.name ? [result.data.name] : [];
-    res.json({ items });
+    const prompt = `Analyze this grocery item image and identify the product's name. Provide a JSON response with "name" and "confidence_score". If not found, name should be "NOT_FOUND".`;
+    const result = await callOllamaVisionAPI(req.file.buffer, prompt);
+    
+    
+    if (!result.success || !result.data?.name) {
+      return res.status(404).json({ 
+        error: 'Could not identify item from image.',
+        details: result.warnings || ['No name identified by AI.'],
+      });
+    }
+
+    const returnedName = result.data.name;
+    const products = await storage.getProducts();
+    
+    // More aggressive fuzzy matching logic
+    const normalize = (str: string) => str.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normalizedReturn = normalize(returnedName);
+    
+    const match = products.find(p => {
+      const pName = normalize(p.name);
+      return pName.includes(normalizedReturn) || normalizedReturn.includes(pName);
+    });
+
+    if (match) {
+      return res.json(match);
+    }
+
+    // Log all product names if no match is found
+    console.log('--- AI Match Failed ---');
+    console.log('AI Output (Normalized):', normalizedReturn);
+    console.log('Available Products (Normalized):');
+    products.forEach(p => console.log(`- ${normalize(p.name)}`));
+    console.log('--------------------');
+
+    res.status(404).json({ 
+      error: 'Product not found in inventory for the identified item.',
+      details: [`Identified as "${returnedName}" but no match was found.`] 
+    });
+    
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Failed to recognize image' });
-  }
-});
-
-router.post('/identify-item', async (req, res, next) => {
-  try {
-    if (!req.rawBody) {
-      return res.status(400).json({ error: 'Image data not received' });
-    }
-    const products: Product[] = await storage.getProducts();
-    const result = await identifyGroceryItem(req.rawBody as Buffer, 'image/jpeg');
-    const { name, category } = result.success && result.data ? result.data : { name: null, category: null };
-    if (name === null) {
-      return res.status(404).json({ error: 'Could not identify item' });
-    }
-    const matched = products.find(p => p.name.toLowerCase() === name.toLowerCase());
-    if (matched) {
-      return res.json(matched);
-    }
-    return res.status(200).json({ name, category });
-  } catch (err) {
-    next(err);
+    res.status(500).json({ error: 'Failed to recognize image due to a server error.' });
   }
 });
 
@@ -56,12 +72,13 @@ router.post('/analyze-expense', upload.single('image'), async (req: Request, res
     if (req.file && req.file.buffer) {
       console.log('Analyzing expense receipt, file size:', req.file.buffer.length);
     }
-    const result = await identifyGroceryItem(req.file?.buffer, req.file?.mimetype);
+    const result = await verifyPaymentSlip(req.file.buffer, req.file.mimetype);
     const analysis = {
-      category: result.data?.category || 'Other',
-      estimatedAmount: result.data?.estimatedPrice || null,
-      summary: result.success ? `Identified: ${result.data.name}` : 'Could not analyze receipt',
+      category: 'Expense',
+      estimatedAmount: result.amount || null,
+      summary: result.success ? `Verified Payment: ${result.transactionId}` : 'Could not verify payment slip',
       warnings: result.warnings || [],
+      isValid: result.isValid,
     };
     console.log('Analysis completed:', analysis);
     res.json(analysis);

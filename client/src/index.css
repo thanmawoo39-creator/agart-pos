@@ -197,6 +197,32 @@
  */
 @layer utilities {
 
+  .video-container {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .video-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 2px;
+    height: 100%;
+    background: linear-gradient(to bottom, transparent, rgba(0, 255, 0, 0.8), transparent);
+    animation: scan 2s infinite linear;
+    transform: translateX(-50%);
+  }
+
+  @keyframes scan {
+    0% {
+      top: -100%;
+    }
+    100% {
+      top: 100%;
+    }
+  }
+
   /* Hide ugly search cancel button in Chrome until we can style it properly */
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;

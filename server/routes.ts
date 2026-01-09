@@ -813,7 +813,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Inventory Management
   const stockAdjustmentSchema = z.object({
-    quantityChange: z.number().int(),
+    quantityChanged: z.number().int(),
     type: z.enum(["stock-in", "adjustment"]),
     reason: z.string().min(1, "Reason is required"),
     staffId: z.string().optional(),
@@ -824,9 +824,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const parsed = stockAdjustmentSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: "Invalid request", details: parsed.error.errors });
-      const { quantityChange, type, reason, staffId, staffName } = parsed.data;
-      const result = await storage.adjustStock(req.params.productId, quantityChange, type, staffId, staffName, reason);
-      if (!result) return res.status(404).json({ error: "Product not found" });
+          const { quantityChanged, type, reason, staffId, staffName } = parsed.data;
+          const result = await storage.adjustStock(req.params.productId, quantityChanged, type, staffId, staffName, reason);      if (!result) return res.status(404).json({ error: "Product not found" });
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: "Failed to adjust stock" });
@@ -985,32 +984,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Gemini AI Routes
-  app.post("/api/ai/identify-item", uploadMemory.single('image'), async (req, res) => {
-    try {
-      if (!req.file) return res.status(400).json({ error: "Image file is required." });
-      const result = await identifyGroceryItem(req.file.buffer, req.file.mimetype);
-      if (!result.success) return res.status(404).json({ error: 'Could not identify item', details: result.warnings });
-      
-      const returnedName = result.data?.name;
-      if (!returnedName) return res.status(404).json({ error: 'AI did not return a name' });
-      const products = await storage.getProducts();
-      
-      // NEW: Improved Fuzzy Matching (Case insensitive, partial match)
-      const normalizedReturn = returnedName.trim().toLowerCase();
-      const match = products.find(p => {
-        const pName = p.name.trim().toLowerCase();
-        return pName === normalizedReturn || pName.includes(normalizedReturn) || normalizedReturn.includes(pName);
-      });
-      
-      if (match) return res.json(match);
-
-      res.status(404).json({ error: 'No product match found for AI result', returnedName });
-    } catch (error) {
-      console.error("Error in /api/ai/identify-item:", error);
-      res.status(500).json({ error: "Internal server error." });
-    }
-  });
-
   app.post("/api/ai/verify-payment", uploadMemory.single('image'), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "Image file is required." });

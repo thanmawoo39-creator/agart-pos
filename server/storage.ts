@@ -98,7 +98,7 @@ export interface IStorage {
   getInventoryLogs(): Promise<InventoryLog[]>;
   getInventoryLogsByProduct(productId: string): Promise<InventoryLog[]>;
   createInventoryLog(log: InsertInventoryLog): Promise<InventoryLog>;
-  adjustStock(productId: string, quantityChange: number, type: 'stock-in' | 'sale' | 'adjustment', staffId?: string, staffName?: string, reason?: string): Promise<{ product: Product; log: InventoryLog } | undefined>;
+  adjustStock(productId: string, quantityChanged: number, type: 'stock-in' | 'sale' | 'adjustment', staffId?: string, staffName?: string, reason?: string): Promise<{ product: Product; log: InventoryLog } | undefined>;
 
   // Expenses
   getExpenses(): Promise<Expense[]>;
@@ -545,12 +545,12 @@ export class POSStorage implements IStorage {
     };
   }
 
-  async adjustStock(productId: string, quantityChange: number, type: 'stock-in' | 'sale' | 'adjustment', staffId?: string, staffName?: string, reason?: string): Promise<{ product: Product; log: InventoryLog } | undefined> {
+  async adjustStock(productId: string, quantityChanged: number, type: 'stock-in' | 'sale' | 'adjustment', staffId?: string, staffName?: string, reason?: string): Promise<{ product: Product; log: InventoryLog } | undefined> {
     const product = await this.getProduct(productId);
     if (!product) return undefined;
 
     const previousStock = product.stock || 0;
-    const currentStock = previousStock + quantityChange;
+    const currentStock = previousStock + quantityChanged;
 
     // Update product stock
     await this.updateProduct(productId, { stock: currentStock });
@@ -560,7 +560,7 @@ export class POSStorage implements IStorage {
       productId,
       productName: product.name,
       type,
-      quantityChanged: quantityChange,
+      quantityChanged: quantityChanged,
       previousStock,
       currentStock,
       staffId,

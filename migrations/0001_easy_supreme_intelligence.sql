@@ -1,1 +1,0 @@
-ALTER TABLE `products` ADD `status` text DEFAULT 'active' NOT NULL;

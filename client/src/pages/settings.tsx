@@ -37,6 +37,8 @@ export default function SettingsPage() {
         aiImageRecognitionEnabled: settings.aiImageRecognitionEnabled || false,
         enableTax: settings.enableTax || false,
         taxPercentage: settings.taxPercentage || 0,
+        enableLocalAi: settings.enableLocalAi || false,
+        localAiUrl: settings.localAiUrl || "",
         geminiApiKey: settings.geminiApiKey || "",
         groqApiKey: settings.groqApiKey || "",
         enableMobileScanner: settings.enableMobileScanner ?? true,
@@ -394,6 +396,48 @@ export default function SettingsPage() {
                     Primary AI service for image recognition and business insights.
                   </p>
                 </div>
+
+                <div className="border-t my-4" />
+
+                <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                        <Label htmlFor="enableLocalAi" className="text-base">
+                        Enable Local AI Fallback
+                        </Label>
+                        <p className="text-sm text-muted-foreground">
+                        Use a local AI model (Ollama) for cost-effective recognition, with Gemini as a backup.
+                        </p>
+                    </div>
+                    <Switch
+                        id="enableLocalAi"
+                        checked={formData.enableLocalAi || false}
+                        onCheckedChange={(checked) =>
+                        setFormData({ ...formData, enableLocalAi: checked })
+                        }
+                    />
+                </div>
+
+                {formData.enableLocalAi && (
+                    <div className="space-y-2">
+                        <Label htmlFor="localAiUrl">
+                        Local AI Endpoint URL
+                        </Label>
+                        <Input
+                        id="localAiUrl"
+                        type="url"
+                        value={formData.localAiUrl || ""}
+                        onChange={(e) =>
+                            setFormData({ ...formData, localAiUrl: e.target.value })
+                        }
+                        placeholder="http://localhost:11434"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                        The endpoint for your locally running Ollama service.
+                        </p>
+                    </div>
+                )}
+
+                <div className="border-t my-4" />
 
                 <div className="space-y-2">
                   <Label htmlFor="groqApiKey">

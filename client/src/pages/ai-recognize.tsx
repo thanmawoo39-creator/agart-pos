@@ -47,7 +47,7 @@ export function AIRecognizePage() {
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
-          <ImageRecognition addToCart={addToCart} />
+          <ImageRecognition addToCart={addToCart} products={products} />
         </div>
         
         <div>

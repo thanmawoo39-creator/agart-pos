@@ -137,6 +137,8 @@ export const appSettings = sqliteTable("app_settings", {
   currency: text("currency").default("USD"),
   taxRate: real("tax_rate").default(0),
   lowStockThreshold: integer("low_stock_threshold").default(5),
+  enableLocalAi: integer("enable_local_ai", { mode: "boolean" }).notNull().default(false),
+  localAiUrl: text("local_ai_url"),
 });
 
 // Alerts
