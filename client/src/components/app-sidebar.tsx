@@ -46,7 +46,7 @@ export function AppSidebar() {
   const { t } = useTranslation();
   const [location] = useLocation();
   const { currentStaff, isLoggedIn, isOwner } = useAuth();
-  const { setOpen, setOpenMobile, isMobile } = useSidebar();
+  const { setOpen, setOpenMobile, isMobile, state } = useSidebar();
 
   const currentRole = currentStaff?.role || "cashier";
 
@@ -71,14 +71,20 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4 md:p-5 border-b border-sidebar-border">
         <Link href="/" data-testid="link-home" onClick={handleNavClick}>
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-indigo-600">
-              <ShoppingCart className="w-4.5 h-4.5 text-white" />
+          <div className="flex items-center justify-center gap-2.5">
+            <div className="flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden flex-shrink-0">
+              <img 
+                src="/favicon.png" 
+                alt="POS Logo" 
+                className="w-full h-full object-contain"
+              />
             </div>
-            <div className="flex flex-col">
-              <span className="text-base font-semibold text-sidebar-foreground">{t('app.name')}</span>
-              <span className="text-[10px] text-muted-foreground">{t('app.tagline')}</span>
-            </div>
+            {state === "expanded" && (
+              <div className="flex flex-col">
+                <span className="text-base font-semibold text-sidebar-foreground">{t('app.name')}</span>
+                <span className="text-[10px] text-muted-foreground">{t('app.tagline')}</span>
+              </div>
+            )}
           </div>
         </Link>
       </SidebarHeader>
