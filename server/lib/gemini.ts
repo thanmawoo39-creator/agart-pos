@@ -41,7 +41,7 @@ export async function callGeminiVisionAPI(imageBuffer: Buffer, mimeType: string,
   while (retries > 0) {
     try {
       const genAI = await getGeminiAI();
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const model = genAI.getGenerativeModel({ model: 'gemini-3-flash' });
       const imagePart = prepareImageData(imageBuffer, mimeType);
 
       const result = await model.generateContent([prompt, imagePart]);
@@ -141,7 +141,7 @@ export async function verifyPaymentSlip(imageBuffer: Buffer, mimeType: string): 
 
     const genAI = await getGeminiAI();
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3-flash',
       generationConfig: {
         responseMimeType: "application/json",
       }
