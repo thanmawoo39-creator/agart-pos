@@ -11,6 +11,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/lib/auth-context";
 import { ShiftButton } from "@/components/shift-button";
@@ -45,6 +46,7 @@ export function AppSidebar() {
   const { t } = useTranslation();
   const [location] = useLocation();
   const { currentStaff, isLoggedIn, isOwner } = useAuth();
+  const { setOpen, setOpenMobile, isMobile } = useSidebar();
 
   const currentRole = currentStaff?.role || "cashier";
 
@@ -53,13 +55,22 @@ export function AppSidebar() {
     return roles.includes(currentRole);
   };
 
+  // Handle navigation click - close sidebar on mobile, collapse on desktop
+  const handleNavClick = () => {
+    if (isMobile) {
+      setOpenMobile(false); // Close mobile sidebar
+    } else {
+      setOpen(false); // Collapse desktop sidebar
+    }
+  };
+
   const filteredNavItems = navItems.filter(item => canAccess(item.roles));
   const filteredAdminItems = adminItems.filter(item => canAccess(item.roles));
 
   return (
     <Sidebar>
       <SidebarHeader className="p-4 md:p-5 border-b border-sidebar-border">
-        <Link href="/" data-testid="link-home">
+        <Link href="/" data-testid="link-home" onClick={handleNavClick}>
           <div className="flex items-center gap-2.5">
             <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-indigo-600">
               <ShoppingCart className="w-4.5 h-4.5 text-white" />
@@ -84,7 +95,7 @@ export function AppSidebar() {
                       isActive={isActive}
                       className="py-2.5 px-3"
                     >
-                      <Link href={item.url} data-testid={`link-${t(item.titleKey).toLowerCase().replace(/\s+/g, '-').replace(/[()]/g, '')}`}>
+                      <Link href={item.url} data-testid={`link-${t(item.titleKey).toLowerCase().replace(/\s+/g, '-').replace(/[()]/g, '')}`} onClick={handleNavClick}>
                         <item.icon className="w-4 h-4" />
                         <span className="text-sm font-medium">{t(item.titleKey)}</span>
                       </Link>
@@ -109,7 +120,7 @@ export function AppSidebar() {
                         isActive={isActive}
                         className="py-2.5 px-3"
                       >
-                        <Link href={item.url} data-testid={`link-${t(item.titleKey).toLowerCase()}`}>
+                        <Link href={item.url} data-testid={`link-${t(item.titleKey).toLowerCase()}`} onClick={handleNavClick}>
                           <item.icon className="w-4 h-4" />
                           <span className="text-sm font-medium">{t(item.titleKey)}</span>
                         </Link>
