@@ -19,6 +19,14 @@ export function AIRecognizePage() {
     }
   });
 
+  // Convert products to match expected interface
+  const convertedProducts = products.map(product => ({
+    ...product,
+    status: product.status || 'active',
+    unit: product.unit || 'pcs',
+    category: product.category || null,
+  }));
+
   const addToCart = (product: any) => {
     // Convert partial product to full Product by adding missing required fields
     const fullProduct: Product = {
@@ -47,7 +55,7 @@ export function AIRecognizePage() {
             : item
         );
       }
-      return [...prev, fullProduct];
+      return [...prev, { ...fullProduct, quantity: 1 }];
     });
 
     toast({
@@ -65,7 +73,7 @@ export function AIRecognizePage() {
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
-          <ImageRecognition addToCart={addToCart} products={products} />
+          <ImageRecognition addToCart={addToCart} products={convertedProducts} />
         </div>
         
         <div>
