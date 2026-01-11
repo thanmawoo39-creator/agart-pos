@@ -83,15 +83,32 @@ function AppHeader() {
 
 function ProtectedApp() {
   const { isLoggedIn } = useAuth();
-  const [loginOpen, setLoginOpen] = useState(!isLoggedIn);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [, setLocation] = useLocation();
+
+  // Check if app is running in standalone PWA mode
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
+                        (window.navigator as any).standalone || 
+                        document.referrer.includes('android-app://');
 
   // Force login modal on startup if not authenticated
   useEffect(() => {
+    // Always show login screen if not logged in, regardless of PWA mode
     if (!isLoggedIn) {
       setLoginOpen(true);
+    } else {
+      setLoginOpen(false);
     }
   }, [isLoggedIn]);
+
+  // Additional PWA-specific check
+  useEffect(() => {
+    if (isStandalone && !isLoggedIn) {
+      // In PWA mode, ensure we're at root for login
+      setLocation('/');
+      setLoginOpen(true);
+    }
+  }, [isStandalone, isLoggedIn, setLocation]);
 
   // Handle successful login
   const handleLoginSuccess = () => {

@@ -63,11 +63,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           if (!response.ok) {
             // Session invalid, clear it
+            console.warn("Session verification failed, clearing session");
             setSession(null);
           }
         } catch (error) {
-          // Network error, keep session but log warning
-          console.warn("Failed to verify session:", error);
+          // Network error - in PWA mode, this might be expected
+          // Don't clear session immediately, but log the issue
+          console.warn("Failed to verify session (possible PWA network issue):", error);
+          
+          // If we're in standalone mode and verification fails, 
+          // we should still allow the session but mark it for re-verification
+          const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
+                              (window.navigator as any).standalone;
+          
+          if (!isStandalone) {
+            // Only clear session in browser mode, not PWA mode
+            setSession(null);
+          }
         }
       }
     };
