@@ -19,6 +19,8 @@ export const products = sqliteTable("products", {
   unit: text("unit").notNull().default("pcs"),
   category: text("category"),
   status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // Customers
@@ -35,6 +37,8 @@ export const customers = sqliteTable("customers", {
   currentBalance: real("current_balance").notNull().default(0),
   loyaltyPoints: integer("loyalty_points").notNull().default(0),
   riskTag: text("risk_tag", { enum: ["low", "high"] }).notNull().default("low"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // Staff
@@ -45,6 +49,8 @@ export const staff = sqliteTable("staff", {
   role: text("role", { enum: ["owner", "manager", "cashier"] }).notNull(),
   barcode: text("barcode").unique(),
   status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // Sales
@@ -58,9 +64,11 @@ export const sales = sqliteTable("sales", {
   paymentStatus: text("payment_status", { enum: ["paid", "unpaid"] }).notNull().default("paid"),
   customerId: text("customer_id").references(() => customers.id),
   storeId: text("store_id"),
-  timestamp: text("timestamp").notNull(),
+  staffId: text("staff_id"),
   createdBy: text("created_by"),
   paymentSlipUrl: text("payment_slip_url"),
+  timestamp: text("timestamp").notNull(),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // Sale Items (for detailed tracking)
@@ -86,6 +94,7 @@ export const creditLedger = sqliteTable("credit_ledger", {
   saleId: text("sale_id").references(() => sales.id),
   voucherImageUrl: text("voucher_image_url"),
   timestamp: text("timestamp").notNull(),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   createdBy: text("created_by"),
 });
 
@@ -119,6 +128,7 @@ export const inventoryLogs = sqliteTable("inventory_logs", {
   staffName: text("staff_name"),
   reason: text("reason"),
   timestamp: text("timestamp").notNull(),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // Expenses
@@ -184,6 +194,7 @@ export const shifts = sqliteTable("shifts", {
   cashSales: real("cash_sales").notNull().default(0),
   cardSales: real("card_sales").notNull().default(0),
   creditSales: real("credit_sales").notNull().default(0),
+  mobileSales: real("mobile_sales").notNull().default(0),
   createdAt: text("created_at").notNull(),
 });
 
@@ -286,6 +297,7 @@ export const saleSchema = z.object({
   paymentStatus: z.enum(["paid", "unpaid"]).default("paid"),
   customerId: z.string().optional(),
   storeId: z.string().optional(),
+  staffId: z.string().optional(),
   timestamp: z.string(),
   createdBy: z.string().optional(),
   paymentSlipUrl: z.string().optional(),

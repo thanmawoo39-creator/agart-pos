@@ -19,22 +19,40 @@ export function AIRecognizePage() {
     }
   });
 
-  const addToCart = (product: Product) => {
+  const addToCart = (product: any) => {
+    // Convert partial product to full Product by adding missing required fields
+    const fullProduct: Product = {
+      id: product.id || crypto.randomUUID(),
+      name: product.name || 'Unknown Product',
+      price: product.price || 0,
+      cost: product.cost || 0,
+      barcode: product.barcode || undefined,
+      imageData: product.imageData || undefined,
+      imageUrl: product.imageUrl || undefined,
+      stock: product.stock || 0,
+      minStockLevel: product.minStockLevel || 0,
+      unit: product.unit || 'pcs',
+      category: product.category || null,
+      status: product.status || 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
     setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
+      const existing = prev.find(item => item.id === fullProduct.id);
       if (existing) {
         return prev.map(item =>
-          item.id === product.id
+          item.id === fullProduct.id
             ? { ...item, quantity: item.quantity + 1 }
             : item
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, fullProduct];
     });
 
     toast({
       title: "Product Added",
-      description: `${product.name} has been added to cart.`,
+      description: `${fullProduct.name} has been added to cart.`,
     });
   };
 

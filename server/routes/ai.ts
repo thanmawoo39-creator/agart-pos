@@ -1,6 +1,6 @@
 import { type Request, type Response, Router } from 'express';
 import { storage } from '../storage';
-import { identifyGroceryItem } from '../lib/gemini';
+import { verifyPaymentSlip } from '../lib/gemini';
 import { callOllamaVisionAPI } from '../lib/local-ai';
 import { type Product } from '@shared/schema';
 import multer from 'multer';

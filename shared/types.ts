@@ -3,12 +3,14 @@ export type Product = {
   name: string;
   barcode?: string | undefined;
   price: number;
-  cost: number;
+  cost: number | null;
   stock: number;
   minStockLevel: number;
   category?: string | undefined;
   unit: "pcs" | "kg" | "g" | "l" | "ml";
   imageData?: string | undefined;
+  imageUrl?: string | undefined;
+  status?: string | undefined;
   createdAt: string;
   updatedAt: string;
 };
@@ -19,8 +21,14 @@ export type Customer = {
   phone?: string | undefined;
   email?: string | undefined;
   address?: string | undefined;
+  barcode?: string | undefined;
+  memberId?: string | undefined;
+  imageUrl?: string | undefined;
+  status?: string | undefined;
   creditLimit: number;
   currentBalance: number;
+  loyaltyPoints: number;
+  riskTag: "low" | "high";
   createdAt: string;
   updatedAt: string;
 };
@@ -29,31 +37,43 @@ export type Sale = {
   id: string;
   items: SaleItem[];
   subtotal: number;
+  discount: number;
   tax: number;
   total: number;
   paymentMethod: "cash" | "card" | "mobile" | "credit";
+  paymentStatus?: "paid" | "unpaid";
   customerId?: string | undefined;
-  staffId: string;
+  storeId?: string | undefined;
+  staffId?: string | undefined;
+  createdBy?: string | undefined;
+  paymentSlipUrl?: string | undefined;
+  timestamp: string;
   createdAt: string;
 };
 
 export type SaleItem = {
+  id: string;
+  saleId: string;
   productId: string;
   productName: string;
   quantity: number;
-  price: number;
-  subtotal: number;
+  unitPrice: number;
+  total: number;
 };
 
 export type CreditLedger = {
   id: string;
   customerId: string;
-  saleId?: string | undefined;
-  paymentId?: string | undefined;
+  customerName: string;
+  type: "charge" | "payment" | "repayment";
   amount: number;
-  balance: number;
-  type: "sale" | "payment";
+  balanceAfter: number;
+  description?: string | null;
+  saleId?: string | undefined;
+  voucherImageUrl?: string | undefined;
+  timestamp: string;
   createdAt: string;
+  createdBy?: string | null;
 };
 
 export type Staff = {
@@ -61,7 +81,7 @@ export type Staff = {
   name: string;
   pin: string;
   role: "cashier" | "manager" | "owner";
-  barcode?: string | undefined;
+  barcode?: string | null;
   status: "active" | "suspended";
   createdAt: string;
   updatedAt: string;
@@ -80,6 +100,7 @@ export type CurrentShift = {
   staffId?: string | undefined;
   staffName?: string | undefined;
   clockInTime?: string | undefined;
+  attendanceId?: string | undefined;
 };
 
 export type InventoryLog = {
@@ -116,8 +137,12 @@ export type InsertStaff = Omit<
   Staff,
   "id" | "createdAt" | "updatedAt" | "suspended"
 >;
-export type InsertAttendance = Omit<Attendance, "id">;
-export type InsertInventoryLog = Omit<InventoryLog, "id" | "createdAt">;
+export type InsertAttendance = Omit<Attendance, "id" | "clockOut">;
+export type InsertInventoryLog = Omit<InventoryLog, "id" | "createdAt"> & {
+  timestamp?: string;
+  previousStock?: number;
+  currentStock?: number;
+};
 export type InsertExpense = Omit<Expense, "id" | "timestamp">;
 
 export type DashboardSummary = {
@@ -184,4 +209,4 @@ export type Shift = {
   mobileSales: number;
 };
 
-export type InsertShift = Omit<Shift, "id" | "clockOut" | "closingCash" | "totalSales" | "cashSales" | "cardSales" | "creditSales" | "mobileSales" | "isActive">;
+export type InsertShift = Omit<Shift, "id" | "createdAt">;

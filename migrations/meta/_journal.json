@@ -36,6 +36,13 @@
       "when": 1767861602101,
       "tag": "0004_dazzling_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1768091174280,
+      "tag": "0005_damp_sentinel",
+      "breakpoints": true
     }
   ]
 }

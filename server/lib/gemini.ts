@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getGeminiAI, hasGeminiApiKey } from './gemini-config';
-import { generateWithFailover, generateStreamingWithFailover, generateVisionWithFailover } from './ai-failover';
+import { generateWithFailover, generateStreamingWithFailover, generateVisionWithFailover, AIResult } from './ai-failover';
 
 
 // Helper function to prepare base64 image data for Gemini API
@@ -264,9 +264,9 @@ INSTRUCTIONS:
 - Keep responses concise (2-4 sentences) but data-driven`;
 
   // Use failover system (Groq → Gemini → Fallback)
-  const result = await generateWithFailover(systemPrompt, userPrompt, {
+  const result = await generateWithFailover(systemPrompt, prompt, {
     preferredProvider: 'groq',
-    preferredModel: 'gemini-3-pro-preview',
+    preferredModel: 'gemini-1.5-flash',
   });
 
   return result.content;
@@ -333,7 +333,7 @@ INSTRUCTIONS:
   // Use failover system with streaming (Groq → Gemini → Fallback)
   const result = await generateStreamingWithFailover(systemPrompt, userPrompt, onToken, {
     preferredProvider: 'groq',
-    preferredModel: 'gemini-3-pro-preview',
+    preferredModel: 'gemini-1.5-flash',
   });
 
   return result.fullContent;
@@ -350,7 +350,7 @@ Focus on key trends, anomalies, and strategic recommendations.`;
   // Use failover system (Groq → Gemini → Fallback)
   const result = await generateWithFailover(systemPrompt, userPrompt, {
     preferredProvider: 'groq',
-    preferredModel: 'gemini-3-pro-preview',
+    preferredModel: 'gemini-1.5-flash',
   });
 
   return result.content;

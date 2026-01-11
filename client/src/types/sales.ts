@@ -2,11 +2,17 @@ export interface Product {
   id: string;
   name: string;
   price: number;
+  cost: number;
   stock: number;
+  minStockLevel: number;
+  unit: string;
   barcode?: string;
   imageUrl?: string | null;
   imageData?: string; // base64 encoded image
   category?: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CartItem extends Product {

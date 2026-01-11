@@ -316,10 +316,6 @@ export async function generateStreamingWithFailover(
   };
 }
 
-import { isLocalAiEnabled } from './gemini-config';
-import { callOllamaVisionAPI } from './local-ai';
-import { callGeminiVisionAPI, AIResult } from './gemini';
-
 /**
  * Generate vision-based response with failover
  * Tries Local AI (Ollama) first, falls back to Gemini on error or if disabled

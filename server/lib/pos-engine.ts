@@ -14,7 +14,7 @@ export async function getSalesSummary() {
         count: count(schema.sales.id)
       })
       .from(schema.sales)
-      .where(gte(schema.sales.createdAt, today));
+      .where(gte(schema.sales.timestamp, today.toISOString()));
 
     // 2. Get Receivables (Ledger)
     // Note: Wrapping in try-catch in case table structure differs slightly in backup
@@ -23,7 +23,7 @@ export async function getSalesSummary() {
         const [res] = await db
         .select({ total: sum(schema.creditLedger.amount) })
         .from(schema.creditLedger)
-        .where(eq(schema.creditLedger.type, 'credit'));
+        .where(eq(schema.creditLedger.type, 'charge'));
         receivables = Number(res?.total || 0);
     } catch (e) { console.log("Ledger calculation skipped due to schema mismatch"); }
 
@@ -31,7 +31,7 @@ export async function getSalesSummary() {
     const [lowStock] = await db
       .select({ count: count(schema.products.id) })
       .from(schema.products)
-      .where(lt(schema.products.quantity, 5));
+      .where(lt(schema.products.stock, 5));
 
     return {
       totalSales: Number(salesData?.total || 0),
@@ -49,9 +49,13 @@ export async function getSalesSummary() {
 export async function processSale(saleData: any) {
     // Basic Sale Recording
     return await db.insert(schema.sales).values({
+        subtotal: saleData.subtotal || 0,
+        discount: saleData.discount || 0,
+        tax: saleData.tax || 0,
         total: saleData.total,
         paymentMethod: saleData.paymentMethod || 'cash',
-        createdAt: new Date(),
+        paymentStatus: saleData.paymentStatus || 'paid',
+        timestamp: new Date().toISOString(),
     }).returning();
 }
 
@@ -59,7 +63,7 @@ export const posEngine = {
     getSalesSummary,
     processSale,
     // Add simple fallbacks
-    findProductByBarcode: async (code) => {
+    findProductByBarcode: async (code: string) => {
         const [p] = await db.select().from(schema.products).where(eq(schema.products.barcode, code)).limit(1);
         return p;
     },

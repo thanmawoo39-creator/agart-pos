@@ -8,10 +8,10 @@ async function resetAdmin() {
 
   try {
     // Check if staff table exists first
-    const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-    console.log('Available tables:', tables.map(t => t.name));
+    const tables = await (db as any).prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+    console.log('Available tables:', tables.map((t: any) => t.name));
     
-    const staffTableExists = tables.some(t => t.name === 'staff');
+    const staffTableExists = tables.some((t: any) => t.name === 'staff');
     
     if (!staffTableExists) {
       console.log('❌ Staff table does not exist. Please run database migration first.');

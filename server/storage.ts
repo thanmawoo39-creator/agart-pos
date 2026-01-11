@@ -23,8 +23,8 @@ import type {
   InsertCustomer,
   Staff,
   InsertStaff,
-} from "../shared/types";
-import type { EnrichedCreditLedger } from "../shared/schema";
+  EnrichedCreditLedger,
+} from "../shared/schema";
 import { 
   products,
   customers,
@@ -231,6 +231,7 @@ export class POSStorage implements IStorage {
       items: sale.items.map(item => ({ ...item, productId: item.productId, productName: item.productName, quantity: item.quantity, unitPrice: item.unitPrice, total: item.total })),
       customerId: sale.customerId ?? undefined,
       storeId: sale.storeId ?? undefined,
+      staffId: sale.staffId ?? undefined,
       createdBy: sale.createdBy ?? undefined,
       paymentSlipUrl: sale.paymentSlipUrl ?? undefined,
     }));
@@ -251,6 +252,7 @@ export class POSStorage implements IStorage {
       items: sale.items.map(item => ({ ...item, productId: item.productId, productName: item.productName, quantity: item.quantity, unitPrice: item.unitPrice, total: item.total })),
       customerId: sale.customerId ?? undefined,
       storeId: sale.storeId ?? undefined,
+      staffId: sale.staffId ?? undefined,
       createdBy: sale.createdBy ?? undefined,
       paymentSlipUrl: sale.paymentSlipUrl ?? undefined,
     };
@@ -350,6 +352,7 @@ export class POSStorage implements IStorage {
         items: insertSale.items,
         customerId: saleResult.customerId ?? undefined,
         storeId: saleResult.storeId ?? undefined,
+        staffId: saleResult.staffId ?? undefined,
         createdBy: saleResult.createdBy ?? undefined,
         paymentSlipUrl: saleResult.paymentSlipUrl ?? undefined,
     };
@@ -436,7 +439,6 @@ export class POSStorage implements IStorage {
   async getAttendance(): Promise<Attendance[]> {
     return await db.select().from(attendance).orderBy(desc(attendance.date));
   }
-
   async getAttendanceByDate(date: string): Promise<Attendance[]> {
     return await db.select().from(attendance).where(eq(attendance.date, date));
   }
@@ -450,9 +452,9 @@ export class POSStorage implements IStorage {
     if (active) {
       return {
         isActive: true,
-        staffId: active.staffId,
-        staffName: active.staffName,
-        clockInTime: active.clockInTime,
+        staffId: active.staffId || null,
+        staffName: active.staffName || null,
+        clockInTime: active.clockInTime || null,
         attendanceId: active.id,
       };
     }
@@ -541,7 +543,7 @@ export class POSStorage implements IStorage {
       ...newLog,
       staffId: newLog.staffId || undefined,
       staffName: newLog.staffName || undefined,
-      reason: newLog.reason || undefined,
+      reason: newLog.reason || '',
     };
   }
 

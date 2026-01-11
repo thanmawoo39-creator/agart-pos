@@ -38,7 +38,7 @@ async function createStaffAndAdmin() {
     `);
     
     // Verify creation
-    const admin = db.prepare("SELECT * FROM staff WHERE name = 'admin'").get();
+    const admin = db.prepare("SELECT * FROM staff WHERE name = 'admin'").get() as any;
     
     console.log('✅ SUCCESS: Admin user created');
     console.log('   Name:', admin.name);
