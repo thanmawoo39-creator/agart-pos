@@ -41,7 +41,7 @@ export async function callGeminiVisionAPI(imageBuffer: Buffer, mimeType: string,
   while (retries > 0) {
     try {
       const genAI = await getGeminiAI();
-      const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' });
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
       const imagePart = prepareImageData(imageBuffer, mimeType);
 
       const result = await model.generateContent([prompt, imagePart]);
@@ -266,7 +266,7 @@ INSTRUCTIONS:
   // Use failover system (Groq → Gemini → Fallback)
   const result = await generateWithFailover(systemPrompt, prompt, {
     preferredProvider: 'groq',
-    preferredModel: 'gemini-1.5-flash',
+    preferredModel: 'llama-3.3-70b-versatile',
   });
 
   return result.content;
@@ -333,7 +333,7 @@ INSTRUCTIONS:
   // Use failover system with streaming (Groq → Gemini → Fallback)
   const result = await generateStreamingWithFailover(systemPrompt, userPrompt, onToken, {
     preferredProvider: 'groq',
-    preferredModel: 'gemini-1.5-flash',
+    preferredModel: 'llama-3.3-70b-versatile',
   });
 
   return result.fullContent;
@@ -350,7 +350,7 @@ Focus on key trends, anomalies, and strategic recommendations.`;
   // Use failover system (Groq → Gemini → Fallback)
   const result = await generateWithFailover(systemPrompt, userPrompt, {
     preferredProvider: 'groq',
-    preferredModel: 'gemini-1.5-flash',
+    preferredModel: 'llama-3.3-70b-versatile',
   });
 
   return result.content;

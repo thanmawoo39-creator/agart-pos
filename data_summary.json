@@ -1,0 +1,64 @@
+{
+  "alerts": [],
+  "app_settings": [
+    {
+      "id": 1,
+      "store_name": "My Store",
+      "store_address": "",
+      "store_phone": "",
+      "store_logo_url": null,
+      "ai_image_recognition_enabled": 1,
+      "enable_tax": 0,
+      "tax_percentage": 0,
+      "gemini_api_key": "AIzaSyANLmRwuIQVHWRST1rWpfZCYUUdqSctjKc",
+      "groq_api_key": "",
+      "enable_mobile_scanner": 1,
+      "enable_photo_capture": 1,
+      "currency_code": "MMK",
+      "currency_symbol": "K",
+      "currency_position": "after",
+      "updated_at": "2026-01-09T11:16:35.116Z",
+      "enable_local_ai": 1,
+      "local_ai_url": "",
+      "local_ai_model": null
+    }
+  ],
+  "attendance": [
+    {
+      "id": "80c1c894-f7ac-44d3-83b6-61cb79ae293b",
+      "staff_id": "ff684a5f-9c34-4b06-87a5-7a5f35ea8445",
+      "staff_name": "Admin",
+      "date": "2026-01-09",
+      "clock_in_time": "2026-01-09T08:21:01.239Z",
+      "clock_out_time": "",
+      "total_hours": 0,
+      "opening_cash": 0,
+      "total_sales": 0,
+      "cash_sales": 0,
+      "card_sales": 0,
+      "credit_sales": 0,
+      "mobile_sales": 0
+    }
+  ],
+  "credit_ledger": [],
+  "customers": [],
+  "expenses": [],
+  "inventory_logs": [],
+  "products": [],
+  "sale_items": [],
+  "sales": [],
+  "shifts": [],
+  "staff": [
+    {
+      "id": "ff684a5f-9c34-4b06-87a5-7a5f35ea8445",
+      "name": "Admin",
+      "pin": "c0f5575f3b329d1893ffe7d4fc894ecd:baccffd6e30f1daa42d2b315c447646ede79e4addf83ec3cc912920bf5dea543945a650f26ed990519dab2624bda6fa9f552608a864a00efbf326983ec4af8bd",
+      "role": "owner",
+      "barcode": null,
+      "status": "active",
+      "created_at": "2024-01-01 00:00:00",
+      "updated_at": "2024-01-01 00:00:00"
+    }
+  ],
+  "__drizzle_migrations": []
+}

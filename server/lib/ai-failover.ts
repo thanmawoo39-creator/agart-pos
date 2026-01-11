@@ -82,7 +82,7 @@ export async function generateWithFailover(
   systemPrompt: string,
   userPrompt: string,
   options?: {
-    preferredModel?: 'gemini-1.5-flash' | 'gemini-2.5-pro' | 'llama-3.3-70b-versatile' | 'mixtral-8x7b-32768';
+    preferredModel?: 'gemini-3-pro' | 'gemini-1.5-flash' | 'gemini-2.5-pro' | 'llama-3.3-70b-versatile' | 'mixtral-8x7b-32768';
     preferredProvider?: 'gemini' | 'groq'; // New option to specify preferred provider
     skipGemini?: boolean; // Keep for explicit skipping
     skipGroq?: boolean; // New option to skip Groq
@@ -204,7 +204,7 @@ export async function generateStreamingWithFailover(
   userPrompt: string,
   onToken: (token: string) => void,
   options?: {
-    preferredModel?: 'gemini-1.5-flash' | 'gemini-2.5-pro' | 'llama-3.3-70b-versatile' | 'mixtral-8x7b-32768';
+    preferredModel?: 'gemini-3-pro' | 'gemini-1.5-flash' | 'gemini-2.5-pro' | 'llama-3.3-70b-versatile' | 'mixtral-8x7b-32768';
     preferredProvider?: 'gemini' | 'groq'; // New option to specify preferred provider
   }
 ): Promise<{
@@ -250,7 +250,7 @@ export async function generateStreamingWithFailover(
 
     if (await hasGeminiApiKey()) {
       const genAI = await getGeminiAI();
-      const geminiModel = genAI.getGenerativeModel({ model: options?.preferredModel || 'gemini-1.5-flash' }); // Use Gemini-specific default model
+      const geminiModel = genAI.getGenerativeModel({ model: options?.preferredModel || 'gemini-3-pro' }); // Use Gemini-specific default model
 
       const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
       const result = await geminiModel.generateContentStream([fullPrompt]);
