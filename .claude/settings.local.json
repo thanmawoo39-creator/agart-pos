@@ -39,7 +39,8 @@
       "Bash(cd:*)",
       "Bash(find:*)",
       "Bash(ls:*)",
-      "Bash(timeout 5 tail:*)"
+      "Bash(timeout 5 tail:*)",
+      "Bash(tasklist:*)"
     ]
   }
 }

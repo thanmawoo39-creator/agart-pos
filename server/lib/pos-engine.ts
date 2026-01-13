@@ -49,6 +49,7 @@ export async function getSalesSummary() {
 export async function processSale(saleData: any) {
     // Basic Sale Recording
     return await db.insert(schema.sales).values({
+        businessUnitId: saleData.businessUnitId || '1',
         subtotal: saleData.subtotal || 0,
         discount: saleData.discount || 0,
         tax: saleData.tax || 0,

@@ -28,7 +28,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
-import { Plus, Pencil, Trash2, Users, Shield, UserCog, User, UserX, UserCheck } from "lucide-react";
+import { useBusinessMode } from "@/contexts/BusinessModeContext";
+import { Plus, Pencil, Trash2, Users, Shield, UserCog, User, UserX, UserCheck, ChefHat } from "lucide-react";
+import { API_BASE_URL } from "@/lib/api-config";
 import type { Staff, StaffRole, StaffStatus } from "@shared/schema";
 
 type StaffWithoutPin = Omit<Staff, "pin">;
@@ -37,17 +39,21 @@ const roleIcons: Record<StaffRole, typeof Shield> = {
   owner: Shield,
   manager: UserCog,
   cashier: User,
+  kitchen: ChefHat,
 };
 
 const roleColors: Record<StaffRole, string> = {
   owner: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   manager: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   cashier: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+  kitchen: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
 };
 
 export default function StaffPage() {
   const { isOwner } = useAuth();
   const { toast } = useToast();
+  const { businessUnit } = useBusinessMode();
+  const businessUnitId = businessUnit;
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffWithoutPin | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -57,17 +63,34 @@ export default function StaffPage() {
     role: "cashier" as StaffRole,
     barcode: "",
     status: "active" as StaffStatus,
+    businessUnitId: "",
   });
 
   const { data: staff = [], isLoading } = useQuery<StaffWithoutPin[]>({
-    queryKey: ["/api/staff"],
+    queryKey: ['staff', businessUnitId],
+    enabled: !!businessUnitId,
+    queryFn: async () => {
+      if (!businessUnitId) return [];
+      const response = await fetch(`${API_BASE_URL}/api/staff?businessUnitId=${businessUnitId}`, { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch staff');
+      return response.json();
+    },
+  });
+
+  const { data: businessUnits = [] } = useQuery({
+    queryKey: ["/api/business-units"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/business-units`, { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch business units');
+      return response.json();
+    }
   });
 
   const createMutation = useMutation({
     mutationFn: (data: typeof formData) =>
       apiRequest("POST", "/api/staff", data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/staff"] });
+      queryClient.invalidateQueries({ queryKey: ['staff', businessUnitId] });
       toast({ title: "Staff member created successfully" });
       resetForm();
     },
@@ -80,7 +103,7 @@ export default function StaffPage() {
     mutationFn: ({ id, data }: { id: string; data: Partial<typeof formData> }) =>
       apiRequest("PATCH", `/api/staff/${id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/staff"] });
+      queryClient.invalidateQueries({ queryKey: ['staff', businessUnitId] });
       toast({ title: "Staff member updated successfully" });
       resetForm();
     },
@@ -92,7 +115,7 @@ export default function StaffPage() {
   const suspendMutation = useMutation({
     mutationFn: (id: string) => apiRequest("POST", `/api/staff/${id}/suspend`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/staff"] });
+      queryClient.invalidateQueries({ queryKey: ['staff', businessUnitId] });
       toast({ title: "Staff member suspended" });
     },
     onError: () => {
@@ -103,7 +126,7 @@ export default function StaffPage() {
   const activateMutation = useMutation({
     mutationFn: (id: string) => apiRequest("POST", `/api/staff/${id}/activate`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/staff"] });
+      queryClient.invalidateQueries({ queryKey: ['staff', businessUnitId] });
       toast({ title: "Staff member activated" });
     },
     onError: () => {
@@ -114,7 +137,7 @@ export default function StaffPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/staff/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/staff"] });
+      queryClient.invalidateQueries({ queryKey: ['staff', businessUnitId] });
       toast({ title: "Staff member deleted" });
       setDeleteConfirmId(null);
     },
@@ -126,7 +149,7 @@ export default function StaffPage() {
   const resetForm = () => {
     setIsDialogOpen(false);
     setEditingStaff(null);
-    setFormData({ name: "", pin: "", role: "cashier", barcode: "", status: "active" });
+    setFormData({ name: "", pin: "", role: "cashier", barcode: "", status: "active", businessUnitId: "" });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -136,12 +159,17 @@ export default function StaffPage() {
         name: formData.name,
         role: formData.role,
         barcode: formData.barcode || undefined,
+        businessUnitId: formData.businessUnitId || undefined,
       };
       if (formData.pin) {
         updates.pin = formData.pin;
       }
       updateMutation.mutate({ id: editingStaff.id, data: updates });
     } else {
+      if (!formData.businessUnitId) {
+        toast({ title: "Please select a Business Unit / Store", variant: "destructive" });
+        return;
+      }
       createMutation.mutate(formData);
     }
   };
@@ -154,6 +182,7 @@ export default function StaffPage() {
       role: member.role,
       barcode: member.barcode || "",
       status: member.status,
+      businessUnitId: member.businessUnitId || "",
     });
     setIsDialogOpen(true);
   };
@@ -234,6 +263,7 @@ export default function StaffPage() {
                   <TableRow>
                     <TableHead className="min-w-[180px]">Name</TableHead>
                     <TableHead className="min-w-[100px]">Role</TableHead>
+                    <TableHead className="min-w-[160px]">Store</TableHead>
                     <TableHead className="min-w-[100px]">Status</TableHead>
                     <TableHead className="min-w-[100px]">Barcode</TableHead>
                     <TableHead className="text-right min-w-[200px]">Actions</TableHead>
@@ -243,6 +273,7 @@ export default function StaffPage() {
                   {staff.map((member) => {
                     const RoleIcon = roleIcons[member.role];
                     const isSuspended = member.status === "suspended";
+                    const storeName = (businessUnits as any[]).find((u) => u.id === member.businessUnitId)?.name || '-';
                     return (
                       <TableRow key={member.id} data-testid={`row-staff-${member.id}`}>
                         <TableCell>
@@ -258,6 +289,9 @@ export default function StaffPage() {
                             <RoleIcon className="h-3 w-3 mr-1" />
                             <span className="capitalize">{member.role}</span>
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm text-muted-foreground">{storeName}</span>
                         </TableCell>
                         <TableCell>
                           {isSuspended ? (
@@ -368,6 +402,25 @@ export default function StaffPage() {
                   <SelectItem value="owner">Owner (Full Access)</SelectItem>
                   <SelectItem value="manager">Manager (Limited Admin)</SelectItem>
                   <SelectItem value="cashier">Cashier (Sales Only)</SelectItem>
+                  <SelectItem value="kitchen">Kitchen (Kitchen View Only)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="businessUnitId">Business Unit / Store</Label>
+              <Select
+                value={formData.businessUnitId}
+                onValueChange={(value) => setFormData({ ...formData, businessUnitId: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Business Unit" />
+                </SelectTrigger>
+                <SelectContent>
+                  {businessUnits.map((unit: any) => (
+                    <SelectItem key={unit.id} value={unit.id}>
+                      {unit.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

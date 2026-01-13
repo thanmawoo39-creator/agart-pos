@@ -19,6 +19,7 @@ export const products = sqliteTable("products", {
   unit: text("unit").notNull().default("pcs"),
   category: text("category"),
   status: text("status").notNull().default("active"),
+  businessUnitId: text("business_unit_id").references(() => businessUnits.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
@@ -35,8 +36,12 @@ export const customers = sqliteTable("customers", {
   status: text("status").notNull().default("active"),
   creditLimit: real("credit_limit").notNull().default(0),
   currentBalance: real("current_balance").notNull().default(0),
+  dueDate: text("due_date"),
+  creditDueDate: text("credit_due_date"),
+  monthlyClosingDay: integer("monthly_closing_day"),
   loyaltyPoints: integer("loyalty_points").notNull().default(0),
   riskTag: text("risk_tag", { enum: ["low", "high"] }).notNull().default("low"),
+  businessUnitId: text("business_unit_id").references(() => businessUnits.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
@@ -46,9 +51,80 @@ export const staff = sqliteTable("staff", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   pin: text("pin").notNull(),
-  role: text("role", { enum: ["owner", "manager", "cashier"] }).notNull(),
+  role: text("role", { enum: ["owner", "manager", "cashier", "kitchen"] }).notNull(),
   barcode: text("barcode").unique(),
   status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+  businessUnitId: text("business_unit_id").references(() => businessUnits.id),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// Business Units (Dynamic Store Management)
+export const businessUnits = sqliteTable("business_units", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  type: text("type", { enum: ["grocery", "restaurant", "pharmacy", "electronics", "clothing", "Grocery", "Restaurant", "Pharmacy", "Electronics", "Clothing"] }).notNull(),
+  settings: text("settings"), // JSON string for store-specific settings
+  isActive: text("is_active", { enum: ["true", "false"] }).notNull().default("true"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// Business Unit schema for dynamic store management
+export const businessUnitTypeSchema = z.preprocess((val) => {
+  if (typeof val !== "string") return val;
+  const normalized = val.toLowerCase();
+  if (
+    normalized === "grocery" ||
+    normalized === "restaurant" ||
+    normalized === "pharmacy" ||
+    normalized === "electronics" ||
+    normalized === "clothing"
+  ) {
+    return normalized;
+  }
+  return val;
+}, z.enum(["grocery", "restaurant", "pharmacy", "electronics", "clothing"]));
+export type BusinessUnitType = z.infer<typeof businessUnitTypeSchema>;
+
+export const businessUnitSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: businessUnitTypeSchema,
+  settings: z.string().nullable().optional(),
+  isActive: z.enum(["true", "false"]).default("true"),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type BusinessUnit = z.infer<typeof businessUnitSchema>;
+export type InsertBusinessUnit = Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">;
+
+// Restaurant Tables
+export const tables = sqliteTable("tables", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  number: text("number").notNull(),
+  capacity: integer("capacity").notNull(),
+  status: text("status", { enum: ["available", "occupied", "reserved"] }).notNull().default("available"),
+  currentOrder: text("current_order"),
+  lastOrdered: text("last_ordered"),
+  serviceStatus: text("service_status", { enum: ["ordered", "served", "billing"] }),
+  businessUnitId: text("business_unit_id").notNull().references(() => businessUnits.id),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type Table = typeof tables.$inferSelect;
+
+
+// Kitchen Tickets (KOT / Kitchen View)
+export const kitchenTickets = sqliteTable("kitchen_tickets", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  businessUnitId: text("business_unit_id").notNull().references(() => businessUnits.id),
+  tableId: text("table_id").references(() => tables.id),
+  tableNumber: text("table_number"),
+  items: text("items"), // JSON string
+  status: text("status", { enum: ["in_preparation", "ready", "served", "cancelled"] }).notNull().default("in_preparation"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
@@ -64,6 +140,7 @@ export const sales = sqliteTable("sales", {
   paymentStatus: text("payment_status", { enum: ["paid", "unpaid"] }).notNull().default("paid"),
   customerId: text("customer_id").references(() => customers.id),
   storeId: text("store_id"),
+  businessUnitId: text("business_unit_id").notNull().references(() => businessUnits.id),
   staffId: text("staff_id"),
   createdBy: text("created_by"),
   paymentSlipUrl: text("payment_slip_url"),
@@ -87,7 +164,8 @@ export const creditLedger = sqliteTable("credit_ledger", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   customerId: text("customer_id").notNull().references(() => customers.id),
   customerName: text("customer_name").notNull(),
-  type: text("type", { enum: ["charge", "payment", "repayment"] }).notNull(),
+  type: text("type", { enum: ["sale", "repayment"] }).notNull(),
+  transactionType: text("transaction_type", { enum: ["sale", "repayment"] }),
   amount: real("amount").notNull(),
   balanceAfter: real("balance_after").notNull(),
   description: text("description"),
@@ -103,6 +181,7 @@ export const attendance = sqliteTable("attendance", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   staffId: text("staff_id").notNull().references(() => staff.id),
   staffName: text("staff_name").notNull(),
+  businessUnitId: text("business_unit_id").references(() => businessUnits.id),
   date: text("date").notNull(), // YYYY-MM-DD format
   clockInTime: text("clock_in_time").notNull(), // ISO timestamp
   clockOutTime: text("clock_out_time"), // ISO timestamp or null if still working
@@ -150,6 +229,7 @@ export const appSettings = sqliteTable("app_settings", {
   storeAddress: text("store_address"),
   storePhone: text("store_phone"),
   storeLogoUrl: text("store_logo_url"),
+  mobilePaymentQrUrl: text("mobile_payment_qr_url"),
   aiImageRecognitionEnabled: integer("ai_image_recognition_enabled", { mode: "boolean" }).notNull().default(false),
   enableTax: integer("enable_tax", { mode: "boolean" }).notNull().default(false),
   taxPercentage: real("tax_percentage").notNull().default(0),
@@ -185,6 +265,7 @@ export const shifts = sqliteTable("shifts", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   staffId: text("staff_id").notNull().references(() => staff.id),
   staffName: text("staff_name").notNull(),
+  businessUnitId: text("business_unit_id").notNull().references(() => businessUnits.id),
   startTime: text("start_time").notNull(),
   endTime: text("end_time"),
   openingCash: real("opening_cash").notNull(),
@@ -201,14 +282,14 @@ export const shifts = sqliteTable("shifts", {
 // --- Relations ---
 
 export const salesRelations = relations(sales, ({ many }) => ({
-	items: many(saleItems),
+  items: many(saleItems),
 }));
 
 export const saleItemsRelations = relations(saleItems, ({ one }) => ({
-	sale: one(sales, {
-		fields: [saleItems.saleId],
-		references: [sales.id],
-	}),
+  sale: one(sales, {
+    fields: [saleItems.saleId],
+    references: [sales.id],
+  }),
 }));
 
 // --- Zod Schemas & Types ---
@@ -229,10 +310,11 @@ export const productSchema = z.object({
   unit: z.string().default("pcs"), // pcs, bag, box, kg, etc.
   category: z.string().nullable().optional().default(null), // Optional - defaults to null
   status: z.string().optional().default("active"), // active or archived - optional for inserts
+  businessUnitId: z.string().nullable().optional(),
 });
 
 export type Product = z.infer<typeof productSchema>;
-export type InsertProduct = Omit<Product, "id" | "status"> & { status?: string }; // Make status optional for inserts
+export type InsertProduct = Omit<Product, "id" | "status"> & { status?: string; businessUnitId?: string }; // Make status and businessUnitId optional for inserts
 
 // Inventory log schema for audit trail
 export const inventoryLogTypeSchema = z.enum(["stock-in", "sale", "adjustment"]);
@@ -267,8 +349,12 @@ export const customerSchema = z.object({
   status: z.string().default("active"),
   creditLimit: z.number().min(0).default(0),
   currentBalance: z.number().default(0),
+  dueDate: z.string().optional().nullable(),
+  creditDueDate: z.string().optional().nullable(),
+  monthlyClosingDay: z.number().int().min(1).max(31).optional().nullable(),
   loyaltyPoints: z.number().int().min(0).default(0),
   riskTag: z.enum(["low", "high"]).default("low"),
+  businessUnitId: z.string().nullable().optional(),
 });
 
 export type Customer = z.infer<typeof customerSchema>;
@@ -297,6 +383,7 @@ export const saleSchema = z.object({
   paymentStatus: z.enum(["paid", "unpaid"]).default("paid"),
   customerId: z.string().optional(),
   storeId: z.string().optional(),
+  businessUnitId: z.string(),
   staffId: z.string().optional(),
   timestamp: z.string(),
   createdBy: z.string().optional(),
@@ -304,14 +391,15 @@ export const saleSchema = z.object({
 });
 
 export type Sale = z.infer<typeof saleSchema>;
-export type InsertSale = Omit<Sale, "id">;
+export type InsertSale = Omit<Sale, "id"> & { businessUnitId?: string };
 
 // Credit ledger entry schema
 export const creditLedgerSchema = z.object({
   id: z.string(),
   customerId: z.string(),
   customerName: z.string(),
-  type: z.enum(["charge", "payment", "repayment"]),
+  type: z.enum(["sale", "repayment"]),
+  transactionType: z.enum(["sale", "repayment"]).optional().nullable(),
   amount: z.number(),
   balanceAfter: z.number(),
   description: z.string().nullable(),
@@ -320,6 +408,23 @@ export const creditLedgerSchema = z.object({
   timestamp: z.string(),
   createdBy: z.string().nullable(),
 });
+
+export const kitchenTicketStatusSchema = z.enum(["in_preparation", "ready", "served", "cancelled"]);
+export type KitchenTicketStatus = z.infer<typeof kitchenTicketStatusSchema>;
+
+export const kitchenTicketSchema = z.object({
+  id: z.string(),
+  businessUnitId: z.string(),
+  tableId: z.string().nullable().optional(),
+  tableNumber: z.string().nullable().optional(),
+  items: z.string().nullable().optional(),
+  status: kitchenTicketStatusSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type KitchenTicket = z.infer<typeof kitchenTicketSchema>;
+export type InsertKitchenTicket = Omit<KitchenTicket, "id" | "createdAt" | "updatedAt">;
 
 export type CreditLedger = z.infer<typeof creditLedgerSchema>;
 export type InsertCreditLedger = Omit<CreditLedger, "id">;
@@ -330,7 +435,7 @@ export interface EnrichedCreditLedger extends CreditLedger {
 }
 
 // Staff schema with roles
-export const staffRoleSchema = z.enum(["owner", "manager", "cashier"]);
+export const staffRoleSchema = z.enum(["owner", "manager", "cashier", "kitchen"]);
 export type StaffRole = z.infer<typeof staffRoleSchema>;
 
 export const staffStatusSchema = z.enum(["active", "suspended"]);
@@ -343,6 +448,7 @@ export const staffSchema = z.object({
   role: staffRoleSchema,
   barcode: z.string().nullable(),
   status: staffStatusSchema.default("active"),
+  businessUnitId: z.string().nullable(),
 });
 
 export type Staff = z.infer<typeof staffSchema>;
@@ -376,7 +482,16 @@ export interface DashboardSummary {
 }
 
 // Cart item type for Zustand store
-export interface CartItem extends SaleItem {
+export interface CartItem {
+  id: string;
+  productId: Product['id'];
+  productName: Product['name'];
+  quantity: number;
+  unitPrice: Product['price'];
+  total: number;
+  // Product properties for direct access
+  name: Product['name'];
+  price: Product['price'];
   product: Product;
 }
 
@@ -385,6 +500,7 @@ export const attendanceSchema = z.object({
   id: z.string(),
   staffId: z.string(),
   staffName: z.string(),
+  businessUnitId: z.string().nullable().optional(),
   date: z.string(), // YYYY-MM-DD format
   clockInTime: z.string(), // ISO timestamp
   clockOutTime: z.string().nullable(), // ISO timestamp or null if still working
@@ -408,6 +524,7 @@ export interface CurrentShift {
   staffName: string | null;
   clockInTime: string | null;
   attendanceId: string | null;
+  businessUnitId: string | null;
 }
 
 // Expense schema for business expense tracking
@@ -470,6 +587,7 @@ export const appSettingsSchema = z.object({
       return false; // Only validate URL if string is not empty
     }
   }, { message: "Must be a valid URL or empty" }),
+  mobilePaymentQrUrl: z.string().nullable(),
   aiImageRecognitionEnabled: z.boolean().default(false),
   enableTax: z.boolean().default(false),
   taxPercentage: z.number().min(0).max(100).default(0),
@@ -497,6 +615,7 @@ export const shiftSchema = z.object({
   id: z.string(),
   staffId: z.string(),
   staffName: z.string(),
+  businessUnitId: z.string(),
   startTime: z.string(),
   endTime: z.string().nullable().optional(),
   openingCash: z.number().min(0),

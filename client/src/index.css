@@ -4,11 +4,11 @@
 
 /* LIGHT MODE - Indigo/Slate/Emerald palette */
 :root {
-  --button-outline: rgba(0,0,0, .10);
-  --badge-outline: rgba(0,0,0, .05);
+  --button-outline: rgba(0, 0, 0, .10);
+  --badge-outline: rgba(0, 0, 0, .05);
   --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(0,0,0, .03);
-  --elevate-2: rgba(0,0,0, .08);
+  --elevate-1: rgba(0, 0, 0, .03);
+  --elevate-2: rgba(0, 0, 0, .08);
   --background: 210 40% 98%;
   --foreground: 222 47% 11%;
   --border: 214 32% 91%;
@@ -58,7 +58,7 @@
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
-/* Fallback for older browsers */
+  /* Fallback for older browsers */
   --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 
@@ -87,12 +87,41 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
+.dark[data-store-mode="grocery"] {
+  --primary: 160 84% 55%;
+  --ring: 160 84% 55%;
+  --sidebar-primary: 160 84% 55%;
+  --sidebar-ring: 160 84% 55%;
+}
+
+.dark[data-store-mode="restaurant"] {
+  --primary: 24 95% 60%;
+  --ring: 24 95% 60%;
+  --sidebar-primary: 24 95% 60%;
+  --sidebar-ring: 24 95% 60%;
+}
+
+:root[data-store-mode="grocery"] {
+  --primary: 160 84% 39%;
+  --ring: 160 84% 39%;
+  --sidebar-primary: 160 84% 39%;
+  --sidebar-ring: 160 84% 39%;
+}
+
+:root[data-store-mode="restaurant"] {
+  --primary: 24 95% 53%;
+  --ring: 24 95% 53%;
+  --sidebar-primary: 24 95% 53%;
+  --sidebar-ring: 24 95% 53%;
+  --destructive: 0 84% 60%;
+}
+
 .dark {
-  --button-outline: rgba(255,255,255, .10);
-  --badge-outline: rgba(255,255,255, .05);
+  --button-outline: rgba(255, 255, 255, .10);
+  --badge-outline: rgba(255, 255, 255, .05);
   --opaque-button-border-intensity: 9;
-  --elevate-1: rgba(255,255,255, .04);
-  --elevate-2: rgba(255,255,255, .09);
+  --elevate-1: rgba(255, 255, 255, .04);
+  --elevate-2: rgba(255, 255, 255, .09);
   --background: 222 47% 8%;
   --foreground: 210 40% 98%;
   --border: 217 33% 17%;
@@ -136,7 +165,7 @@
   --shadow-xl: 0px 2px 0px 0px hsl(239 84% 67% / 0.00), 0px 8px 10px -1px hsl(239 84% 67% / 0.00);
   --shadow-2xl: 0px 2px 0px 0px hsl(239 84% 67% / 0.00);
 
-/* Fallback for older browsers */
+  /* Fallback for older browsers */
   --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 
@@ -218,6 +247,7 @@
     0% {
       top: -100%;
     }
+
     100% {
       top: 100%;
     }

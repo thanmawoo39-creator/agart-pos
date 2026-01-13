@@ -59,6 +59,8 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { API_BASE_URL } from "@/lib/api-config";
+import { useBusinessMode } from "@/contexts/BusinessModeContext";
 import {
   Users,
   Search,
@@ -80,6 +82,10 @@ const customerFormSchema = z.object({
   barcode: z.string().optional(),
   imageUrl: z.string().url("Invalid URL").optional().or(z.literal("")),
   creditLimit: z.coerce.number().min(0, "Credit limit must be positive"),
+  dueDate: z.string().optional().or(z.literal("")),
+  monthlyClosingDay: z
+    .union([z.coerce.number().int().min(1).max(31), z.literal("" as any)])
+    .optional(),
 });
 
 type CustomerFormValues = z.infer<typeof customerFormSchema>;
@@ -91,6 +97,8 @@ type RepaymentFormValues = z.infer<typeof repaymentFormSchema>;
 
 export default function Customers() {
   const { toast } = useToast();
+  const { businessUnit } = useBusinessMode();
+  const businessUnitId = businessUnit;
   const [scanInput, setScanInput] = useState("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -98,7 +106,14 @@ export default function Customers() {
   const [profileCustomer, setProfileCustomer] = useState<Customer | null>(null);
 
   const { data: customers, isLoading } = useQuery<Customer[]>({
-    queryKey: ["/api/customers"],
+    queryKey: ['customers', businessUnitId],
+    enabled: !!businessUnitId,
+    queryFn: async () => {
+      if (!businessUnitId) return [];
+      const response = await fetch(`${API_BASE_URL}/api/customers?businessUnitId=${businessUnitId}`, { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch customers');
+      return response.json();
+    },
   });
 
   const form = useForm<CustomerFormValues>({
@@ -110,6 +125,8 @@ export default function Customers() {
       barcode: "",
       imageUrl: "",
       creditLimit: 0,
+      dueDate: "",
+      monthlyClosingDay: "" as any,
     },
   });
 
@@ -186,10 +203,10 @@ export default function Customers() {
   const stopCamera = () => {
     try {
       streamRef.current?.getTracks().forEach((t) => t.stop());
-    } catch (e) {}
+    } catch (e) { }
     streamRef.current = null;
     if (videoRef.current) {
-      try { videoRef.current.pause(); videoRef.current.srcObject = null; } catch (e) {}
+      try { videoRef.current.pause(); videoRef.current.srcObject = null; } catch (e) { }
     }
     setCameraModalOpen(false);
   };
@@ -256,7 +273,7 @@ export default function Customers() {
         const constraints: MediaStreamConstraints = selectedDeviceId ? { video: { deviceId: { exact: selectedDeviceId } }, audio: false } : { video: { facingMode: 'environment' }, audio: false };
         const stream = await navigator.mediaDevices.getUserMedia(constraints as MediaStreamConstraints);
         if (!mounted) {
-          try { stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+          try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { }
           return;
         }
         streamRef.current = stream;
@@ -294,10 +311,10 @@ export default function Customers() {
       mounted = false;
       try {
         streamRef.current?.getTracks().forEach((t) => t.stop());
-      } catch (e) {}
+      } catch (e) { }
       streamRef.current = null;
       if (videoRef.current) {
-        try { videoRef.current.pause(); videoRef.current.srcObject = null; } catch (e) {}
+        try { videoRef.current.pause(); videoRef.current.srcObject = null; } catch (e) { }
       }
     };
   }, [cameraModalOpen, selectedDeviceId]);
@@ -321,6 +338,7 @@ export default function Customers() {
         currentBalance: 0,
         loyaltyPoints: 0,
         riskTag: "low",
+        businessUnitId: businessUnitId || undefined,
       });
     },
     onSuccess: () => {
@@ -331,7 +349,7 @@ export default function Customers() {
       form.reset();
       setTempImageData(null);
       setIsAddDialogOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      queryClient.invalidateQueries({ queryKey: ['customers', businessUnitId] });
     },
     onError: (error: Error) => {
       toast({
@@ -381,10 +399,10 @@ export default function Customers() {
 
   const filteredCustomers = Array.isArray(customers)
     ? customers.filter(
-        (c) =>
-          c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          c.phone?.includes(searchTerm)
-      )
+      (c) =>
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.phone?.includes(searchTerm)
+    )
     : [];
 
   // Edit / Delete / Suspend handlers
@@ -399,6 +417,8 @@ export default function Customers() {
       barcode: c.barcode || "",
       imageUrl: c.imageUrl || "",
       creditLimit: c.creditLimit || 0,
+      dueDate: (c as any).dueDate || "",
+      monthlyClosingDay: ((c as any).monthlyClosingDay ?? "") as any,
     });
     setIsAddDialogOpen(true);
   };
@@ -407,7 +427,7 @@ export default function Customers() {
     mutationFn: async (id: string) => {
       return apiRequest('DELETE', `/api/customers/${id}`);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/customers'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['customers', businessUnitId] }),
   });
 
   const confirmDelete = (id: string) => {
@@ -417,36 +437,41 @@ export default function Customers() {
 
   const updateCustomerMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      return apiRequest('PATCH', `/api/customers/${id}`, data);
+      return apiRequest('PATCH', `/api/customers/${id}`, { ...data, businessUnitId });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/customers'] });
+      queryClient.invalidateQueries({ queryKey: ['customers', businessUnitId] });
       setIsAddDialogOpen(false);
       setEditingCustomer(null);
       form.reset();
+      setTempImageData(null);
     },
   });
 
-    const repayDebtMutation = useMutation({
+  const repayDebtMutation = useMutation({
 
-      mutationFn: async ({ customerId, amount }: { customerId: string; amount: number }) => {
+    mutationFn: async ({ customerId, amount }: { customerId: string; amount: number }) => {
 
-        return apiRequest('POST', `/api/customers/${customerId}/repay`, {
+      return apiRequest('POST', `/api/customers/${customerId}/repay`, {
 
-          amount,
+        amount,
 
-          description: "Debt Repayment",
+        businessUnitId,
 
-        });
+        description: "Debt Repayment",
 
-      },
+      });
+
+    },
     onSuccess: (_, variables) => {
       toast({
         title: "Repayment Successful",
         description: `Payment of ${formatCurrency(variables.amount)} has been recorded.`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/customers/${variables.customerId}/ledger`] });
+      queryClient.invalidateQueries({ queryKey: ['customers', businessUnitId] });
+      queryClient.invalidateQueries({
+        queryKey: [`/api/customers/${variables.customerId}/ledger?businessUnitId=${businessUnitId}`],
+      });
       setRepaymentCustomer(null);
     },
     onError: (error: Error) => {
@@ -486,112 +511,138 @@ export default function Customers() {
                   onSubmit={form.handleSubmit((data) => createCustomerMutation.mutate(data))}
                   className="grid grid-cols-1 md:grid-cols-2 gap-4"
                 >
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Customer name" {...field} data-testid="input-customer-name" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone</FormLabel>
-                      <FormControl>
-                        <Input placeholder="+1 555-0123" {...field} data-testid="input-customer-phone" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input placeholder="email@example.com" type="email" {...field} data-testid="input-customer-email" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="barcode"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Barcode / ID</FormLabel>
-                      <FormControl>
-                        <Input placeholder="CUST001" {...field} data-testid="input-customer-barcode" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="imageUrl"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Image URL</FormLabel>
-                      <FormControl>
-                        <Input placeholder="https://example.com/image.png" {...field} data-testid="input-customer-image-url" />
-                      </FormControl>
-                      <FormMessage />
-                      <div className="mt-2">
-                        <div className="flex items-center gap-2">
-                          <Button type="button" onClick={() => startCamera()} data-testid="button-take-photo" disabled={isUploadingImage}>
-                            Take Photo
-                          </Button>
-                          {(tempImageData || field.value) && (
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                setTempImageData(null);
-                                form.setValue('imageUrl', '', { shouldValidate: true, shouldDirty: true });
-                              }}
-                            >
-                              Remove Photo
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Name</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Customer name" {...field} data-testid="input-customer-name" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="phone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone</FormLabel>
+                        <FormControl>
+                          <Input placeholder="+1 555-0123" {...field} data-testid="input-customer-phone" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input placeholder="email@example.com" type="email" {...field} data-testid="input-customer-email" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="barcode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Barcode / ID</FormLabel>
+                        <FormControl>
+                          <Input placeholder="CUST001" {...field} data-testid="input-customer-barcode" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="imageUrl"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Image URL</FormLabel>
+                        <FormControl>
+                          <Input placeholder="https://example.com/image.png" {...field} data-testid="input-customer-image-url" />
+                        </FormControl>
+                        <FormMessage />
+                        <div className="mt-2">
+                          <div className="flex items-center gap-2">
+                            <Button type="button" onClick={() => startCamera()} data-testid="button-take-photo" disabled={isUploadingImage}>
+                              Take Photo
                             </Button>
-                          )}
-                        </div>
-                        {(tempImageData || field.value) && (
-                          <div className="mt-2">
-                            <img src={tempImageData || field.value} alt="preview" className="max-h-40 object-contain border" />
-                            {tempImageData && (
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Image will be uploaded when you save the customer.
-                              </p>
+                            {(tempImageData || field.value) && (
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setTempImageData(null);
+                                  form.setValue('imageUrl', '', { shouldValidate: true, shouldDirty: true });
+                                }}
+                              >
+                                Remove Photo
+                              </Button>
                             )}
                           </div>
-                        )}
-                      </div>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="creditLimit"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Credit Limit ($)</FormLabel>
-                      <FormControl>
-                        <Input type="number" placeholder="500" {...field} data-testid="input-customer-credit-limit" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                          {(tempImageData || field.value) && (
+                            <div className="mt-2">
+                              <img src={tempImageData || field.value} alt="preview" className="max-h-40 object-contain border" />
+                              {tempImageData && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Image will be uploaded when you save the customer.
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="creditLimit"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Credit Limit ($)</FormLabel>
+                        <FormControl>
+                          <Input type="number" placeholder="500" {...field} data-testid="input-customer-credit-limit" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="dueDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Due Date</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="monthlyClosingDay"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Monthly Closing Day</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={1} max={31} placeholder="25" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                   <div className="col-span-1 md:col-span-2 sticky bottom-0 bg-white/80 backdrop-blur-sm py-3 flex gap-2 justify-end border-t">
                     <Button
                       type="submit"
@@ -603,8 +654,8 @@ export default function Customers() {
                     </Button>
                     <Button type="button" variant="outline" onClick={() => { form.reset(); setTempImageData(null); setIsAddDialogOpen(false); }}>Cancel</Button>
                   </div>
-              </form>
-            </Form>
+                </form>
+              </Form>
             </>
           </DialogContent>
         </Dialog>
@@ -673,7 +724,7 @@ export default function Customers() {
                 </TableHeader>
                 <TableBody>
                   {filteredCustomers.map((customer) => {
-                    const isHighRisk = customer.riskTag === "high" || 
+                    const isHighRisk = customer.riskTag === "high" ||
                       (customer.creditLimit > 0 && customer.currentBalance > customer.creditLimit * 0.8);
                     return (
                       <TableRow key={customer.id} data-testid={`row-customer-${customer.id}`} onClick={() => setProfileCustomer(customer)} className="cursor-pointer">
@@ -719,7 +770,7 @@ export default function Customers() {
                         </TableCell>
                         <TableCell className="pr-4 text-right">
                           <div className="flex items-center justify-end gap-1">
-                             <Button
+                            <Button
                               size="sm"
                               variant="outline"
                               onClick={() => setRepaymentCustomer(customer)}
@@ -783,8 +834,8 @@ export default function Customers() {
 
       {/* Profile Sheet */}
       <Sheet open={!!profileCustomer} onOpenChange={(isOpen) => !isOpen && setProfileCustomer(null)}>
-        <CustomerProfileSheetContent 
-          customer={profileCustomer} 
+        <CustomerProfileSheetContent
+          customer={profileCustomer}
           formatCurrency={formatCurrency}
           onClose={() => setProfileCustomer(null)}
         />
@@ -942,9 +993,12 @@ function CustomerProfileSheetContent({
 }) {
   if (!customer) return null;
 
+  const { businessUnit } = useBusinessMode();
+  const businessUnitId = businessUnit;
+
   const { data: ledgerEntries, isLoading: ledgerLoading } = useQuery<CreditLedger[]>({
-    queryKey: [`/api/customers/${customer.id}/ledger`],
-    enabled: !!customer.id,
+    queryKey: [`/api/customers/${customer.id}/ledger?businessUnitId=${businessUnitId}`],
+    enabled: !!customer.id && !!businessUnitId,
   });
 
   const formatDate = (timestamp: string) => {
@@ -1013,7 +1067,7 @@ function CustomerProfileSheetContent({
               <div>
                 <p className="text-sm text-muted-foreground">Total Buying</p>
                 <p className="text-lg font-bold text-amber-600">
-                  {formatCurrency(ledgerEntries.filter(e => e.type === "charge").reduce((sum, e) => sum + e.amount, 0))}
+                  {formatCurrency(ledgerEntries.filter(e => e.type === "sale").reduce((sum, e) => sum + e.amount, 0))}
                 </p>
               </div>
               <div>
@@ -1044,13 +1098,13 @@ function CustomerProfileSheetContent({
                   </TableHeader>
                   <TableBody>
                     {ledgerEntries.map((entry) => {
-                      const isCharge = entry.type === "charge";
+                      const isCharge = entry.type === "sale";
                       return (
                         <TableRow key={entry.id}>
                           <TableCell className="text-xs">{formatDate(entry.timestamp)}</TableCell>
                           <TableCell>
                             <Badge variant={isCharge ? "outline" : "default"}>
-                              {isCharge ? "Charge" : "Repayment"}
+                              {isCharge ? "Sale" : "Repayment"}
                             </Badge>
                           </TableCell>
                           <TableCell className={`text-right font-medium ${isCharge ? "text-amber-600" : "text-emerald-600"}`}>

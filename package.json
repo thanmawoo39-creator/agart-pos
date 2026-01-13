@@ -12,6 +12,7 @@
     "db:migrate": "tsx server/lib/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx server/lib/seed.ts",
     "reset-admin": "tsx server/scripts/reset-admin.ts"
   },
   "dependencies": {
@@ -85,8 +86,6 @@
     "react-resizable-panels": "^2.1.7",
     "react-to-print": "^3.2.0",
     "recharts": "^2.15.2",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "tw-animate-css": "^1.2.5",
@@ -112,7 +111,6 @@
     "@types/passport-local": "^1.0.38",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
-    "@types/sqlite3": "^3.1.11",
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.20",

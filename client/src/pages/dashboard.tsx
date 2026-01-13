@@ -11,17 +11,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/lib/auth-context";
 import { useCurrency } from "@/hooks/use-currency";
+import { useBusinessMode } from "@/contexts/BusinessModeContext";
 import { apiRequest } from "@/lib/queryClient";
 import ReactMarkdown from "react-markdown";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { Alert } from "@shared/schema";
-import { 
-  DollarSign, 
-  CreditCard, 
-  AlertTriangle, 
-  Sparkles, 
-  Bot, 
-  Users, 
+import { useLocation } from "wouter";
+import {
+  DollarSign,
+  CreditCard,
+  AlertTriangle,
+  Sparkles,
+  Bot,
+  Users,
   Package,
   TrendingUp,
   TrendingDown,
@@ -83,6 +85,7 @@ interface GeminiMessage {
 export default function Dashboard() {
   const { isOwner, isManager } = useAuth();
   const { t, i18n } = useTranslation();
+  const [, setLocation] = useLocation();
   const [geminiOpen, setGeminiOpen] = useState(false);
   const [geminiQuestion, setGeminiQuestion] = useState("");
   const [geminiMessages, setGeminiMessages] = useState<GeminiMessage[]>([]);
@@ -114,6 +117,10 @@ export default function Dashboard() {
   const pnlStartDate = startOfMonth.toISOString().split("T")[0];
   const pnlEndDate = now.toISOString().split("T")[0];
 
+  const { businessUnit } = useBusinessMode();
+
+  const canViewDashboardMetrics = isOwner || isManager;
+
   const { data: analytics, isLoading: analyticsLoading } = useQuery<{
     todaySales: number;
     monthlySales: number;
@@ -123,23 +130,27 @@ export default function Dashboard() {
     chartData: { date: string; sales: number }[];
     topProducts: { name: string; quantity: number; revenue: number }[];
   }>({
-    queryKey: ["/api/analytics/summary"],
+    queryKey: [`/api/analytics/summary?businessUnitId=${businessUnit}`],
+    enabled: !!businessUnit && canViewDashboardMetrics,
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 
   const { data: aiInsights, isLoading: insightsLoading } = useQuery<AIInsights>({
     queryKey: ["/api/ai/insights"],
+    enabled: canViewDashboardMetrics,
   });
 
   const pnlUrl = `/api/reports/pnl?startDate=${pnlStartDate}&endDate=${pnlEndDate}`;
   const { data: pnlReport, isLoading: pnlLoading } = useQuery<ProfitLossReport>({
     queryKey: [pnlUrl],
+    enabled: canViewDashboardMetrics,
   });
 
   // Get today's sales for profit calculation
   const today = new Date().toISOString().split('T')[0];
   const { data: todaySales, isLoading: todaySalesLoading } = useQuery<any[]>({
-    queryKey: [`/api/sales?date=${today}`],
+    queryKey: [`/api/sales?date=${today}&businessUnitId=${businessUnit}`],
+    enabled: !!businessUnit && canViewDashboardMetrics,
   });
 
   // Get last 7 days of sales for prediction
@@ -147,7 +158,8 @@ export default function Dashboard() {
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const historyStartDate = sevenDaysAgo.toISOString().split('T')[0];
   const { data: historicalSales, isLoading: historicalSalesLoading } = useQuery<any[]>({
-    queryKey: [`/api/sales?startDate=${historyStartDate}&endDate=${today}`],
+    queryKey: [`/api/sales?startDate=${historyStartDate}&endDate=${today}&businessUnitId=${businessUnit}`],
+    enabled: !!businessUnit && canViewDashboardMetrics,
   });
 
   // Get alerts for admin notifications
@@ -164,7 +176,7 @@ export default function Dashboard() {
       setStreamingContent("");
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-      
+
       try {
         const response = await fetch("/api/gemini/ask", {
           method: "POST",
@@ -177,7 +189,7 @@ export default function Dashboard() {
           }),
           signal: controller.signal,
         });
-        
+
         if (!response.ok) {
           throw new Error("Failed to get AI response");
         }
@@ -240,10 +252,10 @@ export default function Dashboard() {
     onSuccess: (data) => {
       setGeminiPendingMessage("");
       setStreamingContent("");
-      
+
       // Handle different response formats
       let content = data.response;
-      
+
       // If response is a stringified JSON array/object, parse and format it
       if (typeof content === 'string') {
         try {
@@ -272,7 +284,7 @@ export default function Dashboard() {
           // Not JSON, use as-is
         }
       }
-      
+
       setGeminiMessages((prev) => [...prev, { role: "assistant", content }]);
       // Scroll to bottom after message is added
       setTimeout(() => {
@@ -291,10 +303,10 @@ export default function Dashboard() {
   // Calculate today's net profit
   const calculateTodayProfit = () => {
     if (!todaySales || todaySales.length === 0) return 0;
-    
+
     let totalRevenue = 0;
     let totalCost = 0;
-    
+
     todaySales.forEach(sale => {
       totalRevenue += sale.total || 0;
       // Calculate cost from purchase price if available
@@ -306,24 +318,24 @@ export default function Dashboard() {
         });
       }
     });
-    
+
     return totalRevenue - totalCost;
   };
 
   // Prepare sales data for AI prediction
   const prepareSalesDataForPrediction = () => {
     if (!historicalSales || historicalSales.length === 0) return null;
-    
+
     // Group sales by product and calculate daily quantities
     const productSales: { [key: string]: { name: string; dailyQuantities: number[]; totalQuantity: number } } = {};
-    
+
     historicalSales.forEach(sale => {
       if (sale.items && Array.isArray(sale.items)) {
         sale.items.forEach((item: any) => {
           const productId = item.productId || item.id;
           const productName = item.productName || item.name;
           const quantity = item.quantity || 1;
-          
+
           if (!productSales[productId]) {
             productSales[productId] = {
               name: productName,
@@ -331,38 +343,38 @@ export default function Dashboard() {
               totalQuantity: 0
             };
           }
-          
+
           productSales[productId].dailyQuantities.push(quantity);
           productSales[productId].totalQuantity += quantity;
         });
       }
     });
-    
+
     // Get top products by total quantity
     const topProducts = Object.values(productSales)
       .sort((a, b) => b.totalQuantity - a.totalQuantity)
       .slice(0, 5); // Top 5 products
-    
+
     return topProducts;
   };
 
   const handleAskGemini = () => {
     if (!geminiQuestion.trim() || geminiMutation.isPending) return;
-    
+
     // Calculate today's profit
     const todayProfit = calculateTodayProfit();
-    
+
     // Prepare sales data for prediction
     const salesData = prepareSalesDataForPrediction();
-    
+
     // Enhanced prompt with business context
     let enhancedQuestion = geminiQuestion;
-    
+
     // Add profit information
     if (todayProfit !== 0) {
       enhancedQuestion += `\n\nToday's Net Profit: $${todayProfit.toFixed(2)}`;
     }
-    
+
     // Add inventory prediction data
     if (salesData && salesData.length > 0) {
       enhancedQuestion += `\n\nRecent Sales Data (Last 7 Days):\n`;
@@ -386,7 +398,7 @@ export default function Dashboard() {
         enhancedQuestion += `\nConsider these discrepancies in your risk analysis and cash handling recommendations.`;
       }
     }
-    
+
     setGeminiMessages((prev) => [...prev, { role: "user", content: geminiQuestion }]);
     geminiMutation.mutate(enhancedQuestion);
     setGeminiQuestion("");
@@ -418,8 +430,8 @@ export default function Dashboard() {
               <Button variant="outline" size="sm" className="relative">
                 <Bell className="w-4 h-4" />
                 {alertsData && alertsData.unreadCount > 0 && (
-                  <Badge 
-                    variant="destructive" 
+                  <Badge
+                    variant="destructive"
                     className="absolute -top-2 -right-2 h-5 w-5 flex items-center justify-center text-xs p-0"
                   >
                     {alertsData.unreadCount > 99 ? '99+' : alertsData.unreadCount}
@@ -496,6 +508,39 @@ export default function Dashboard() {
               </div>
             )}
             <p className="text-[10px] md:text-xs text-muted-foreground mt-1">Orders placed today</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          data-testid="card-total-receivables"
+          role="button"
+          tabIndex={0}
+          className="cursor-pointer transition-colors hover:bg-muted/50"
+          onClick={() => setLocation('/ledger')}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setLocation('/ledger');
+            }
+          }}
+        >
+          <CardHeader className="flex flex-row items-center justify-between gap-2 p-3 md:p-4 pb-2">
+            <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
+              Total Receivables (ရစရာရှိငွေ စုစုပေါင်း)
+            </CardTitle>
+            <div className="flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-lg bg-amber-500/10">
+              <PiggyBank className="w-4 h-4 md:w-5 md:h-5 text-amber-500" />
+            </div>
+          </CardHeader>
+          <CardContent className="p-3 md:p-4 pt-0">
+            {analyticsLoading ? (
+              <Skeleton className="h-7 md:h-9 w-24 md:w-32" />
+            ) : (
+              <div className="text-xl md:text-3xl font-bold tabular-nums text-foreground" data-testid="text-total-receivables">
+                {formatCurrency(analytics?.totalReceivables ?? 0)}
+              </div>
+            )}
+            <p className="text-[10px] md:text-xs text-muted-foreground mt-1">Outstanding credit for this store</p>
           </CardContent>
         </Card>
 
@@ -634,19 +679,19 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={analytics?.chartData || []}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="date" 
+                <XAxis
+                  dataKey="date"
                   tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 />
-                <YAxis 
+                <YAxis
                   tickFormatter={(value) => formatCurrency(value)}
                 />
                 <Tooltip
                   formatter={(value, name) => [name, formatCurrency(Number(value))].join(': ')}
                 />
-                <Bar 
-                  dataKey="sales" 
-                  fill="#8884d8" 
+                <Bar
+                  dataKey="sales"
+                  fill="#8884d8"
                   radius={[4, 4, 0, 0]}
                 />
               </BarChart>
@@ -847,7 +892,7 @@ export default function Dashboard() {
       </Card>
 
       {/* Floating AI Assistant */}
-      <div 
+      <div
         className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50"
         data-testid="ai-assistant-floating"
       >
@@ -871,7 +916,7 @@ export default function Dashboard() {
                 </div>
               </button>
             </DialogTrigger>
-            <DialogContent 
+            <DialogContent
               className={`${isFullscreen ? 'w-[95vw] h-[95vh] max-w-none' : geminiMutation.isPending || streamingContent ? 'w-[80vw] max-w-5xl' : 'max-w-lg'} max-h-[80vh] flex flex-col transition-all duration-300`}
             >
               <DialogHeader className="flex flex-row items-center justify-between">
@@ -892,7 +937,7 @@ export default function Dashboard() {
                   )}
                 </Button>
               </DialogHeader>
-              
+
               {/* Today's Profit Display */}
               <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 p-4 rounded-lg border">
                 <div className="flex items-center justify-between">
@@ -907,8 +952,8 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-              
-              <ScrollArea 
+
+              <ScrollArea
                 className={`flex-1 ${isFullscreen ? 'min-h-[calc(95vh-180px)]' : 'min-h-[300px]'} ${isFullscreen ? 'max-h-[calc(95vh-180px)]' : 'max-h-[500px]'} pr-4`}
               >
                 <div className="space-y-4" ref={scrollAreaRef}>
@@ -926,11 +971,10 @@ export default function Dashboard() {
                       data-testid={`gemini-message-${idx}`}
                     >
                       <div
-                        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                          msg.role === "user"
-                            ? "bg-indigo-500 text-white"
-                            : "bg-muted"
-                        }`}
+                        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${msg.role === "user"
+                          ? "bg-indigo-500 text-white"
+                          : "bg-muted"
+                          }`}
                       >
                         {msg.role === "assistant" ? (
                           <div className="prose dark:prose-invert max-w-none prose-headings:font-bold prose-p:my-3 prose-ul:my-3 prose-li:my-2 prose-strong:font-semibold">

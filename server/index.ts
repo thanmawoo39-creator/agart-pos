@@ -5,35 +5,77 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { exec } from 'child_process';
 import os from 'os';
+import { ensureNonEmptySqlMigrations, runMigrations } from './lib/run-migrations';
 
 function getLocalIpAddress() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]!) {
-            if (iface.family === 'IPv4' && !iface.internal) {
-                return iface.address;
-            }
-        }
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]!) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
     }
-    return 'localhost';
+  }
+  return 'localhost';
 }
 
 // Create automatic backup on server start
 async function createStartupBackup() {
   try {
-    const dbPath = path.join(process.cwd(), 'sqlite.db');
+    const dbPath = path.join(process.cwd(), 'database.sqlite');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0];
     const backupFileName = `POS_Startup_Backup_${timestamp}.db`;
     const backupPath = path.join(process.cwd(), 'backups', backupFileName);
-    
+
     // Ensure backups directory exists
     await fs.mkdir(path.join(process.cwd(), 'backups'), { recursive: true });
-    
+
     // Create backup copy
     await fs.copyFile(dbPath, backupPath);
     console.log(`✅ Startup backup created: ${backupFileName}`);
   } catch (error) {
     console.error('❌ Failed to create startup backup:', error);
+  }
+}
+
+function execAsync(command: string): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    exec(command, (error, stdout, stderr) => {
+      if (error) return reject(error);
+      resolve({ stdout: stdout ?? '', stderr: stderr ?? '' });
+    });
+  });
+}
+
+async function killPortIfInUse(port: number) {
+  try {
+    const { stdout } = await execAsync(
+      `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique"`
+    );
+
+    const pids = (stdout || "")
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter((s) => /^\d+$/.test(s))
+      .map((s) => Number(s))
+      .filter((n) => Number.isFinite(n) && n > 0);
+
+    if (pids.length === 0) {
+      console.log(`No process found on port ${port}`);
+      return;
+    }
+
+    for (const pid of pids) {
+      console.log(`Killing process ${pid} on port ${port}`);
+      try {
+        await execAsync(`taskkill /F /PID ${pid}`);
+        console.log(`Successfully killed process ${pid}`);
+      } catch (killError: any) {
+        console.log('Failed to kill process:', killError?.message || String(killError));
+      }
+    }
+  } catch (error: any) {
+    console.log('Failed to check/kill port:', error?.message || String(error));
   }
 }
 
@@ -49,34 +91,7 @@ dotenv.config({ path: envPath, override: true });
 const port = 5000;
 console.log(`Checking for processes on port ${port}...`);
 
-// Use PowerShell for Windows compatibility
-exec(
-  `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique) -join '\n'"`,
-  (_error, stdout) => {
-    const pids = (stdout || "")
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter((s) => /^\d+$/.test(s))
-      .map((s) => Number(s))
-      .filter((n) => Number.isFinite(n) && n > 0);
-
-    if (pids.length === 0) {
-      console.log(`No process found on port ${port}`);
-      return;
-    }
-
-    for (const pid of pids) {
-      console.log(`Killing process ${pid} on port ${port}`);
-      exec(`taskkill /F /PID ${pid}`, (killError) => {
-        if (killError) {
-          console.log('Failed to kill process:', killError.message);
-        } else {
-          console.log(`Successfully killed process ${pid}`);
-        }
-      });
-    }
-  }
-);
+const killPortPromise = killPortIfInUse(port);
 
 if (process.env.GEMINI_API_KEY) {
   console.log('GEMINI_API_KEY Loaded');
@@ -89,6 +104,287 @@ import { registerRoutes } from "./routes";
 import { storage } from "./storage";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+
+// Seed default stores function
+async function seedDefaultStores() {
+  try {
+    console.log('🌱 Checking default stores...');
+
+    // Check if stores already exist
+    const existingStores = await storage.getBusinessUnits();
+    console.log(`Found ${existingStores.length} existing stores`);
+
+    if (existingStores.length === 0) {
+      // Create default stores
+      const mainStore = {
+        name: 'Main Store',
+        type: 'Grocery' as const,
+        settings: JSON.stringify({ location: '123 Main Street', phone: '+1 234 567 8900' }),
+        isActive: 'true' as const
+      };
+
+      const restaurant = {
+        name: 'Restaurant',
+        type: 'Restaurant' as const,
+        settings: JSON.stringify({ location: '456 Food Avenue', phone: '+1 234 567 8901' }),
+        isActive: 'true' as const
+      };
+
+      // Insert stores
+      const createdMainStore = await storage.createBusinessUnit(mainStore);
+      const createdRestaurant = await storage.createBusinessUnit(restaurant);
+
+      console.log('✅ Created default stores:');
+      console.log(`   - ${createdMainStore.name} (${createdMainStore.type})`);
+      console.log(`   - ${createdRestaurant.name} (${createdRestaurant.type})`);
+
+      // Create sample products for Main Store (Grocery)
+      await seedGroceryData(createdMainStore.id);
+
+      // Create sample products for Restaurant
+      await seedRestaurantData(createdRestaurant.id);
+
+    } else {
+      console.log('📦 Stores already exist, skipping seed');
+    }
+
+  } catch (error) {
+    console.error('❌ Failed to seed default stores:', error);
+  }
+}
+
+async function seedGroceryData(storeId: string) {
+  try {
+    console.log(`🛒 Seeding grocery data for store ${storeId}`);
+
+    // Create products
+    const products = [
+      {
+        name: 'Fresh Apples',
+        price: 2.99,
+        stock: 50,
+        category: 'Fruits & Vegetables',
+        businessUnitId: storeId,
+        barcode: '1234567890',
+        cost: 1.50,
+        minStockLevel: 10,
+        unit: 'kg',
+        status: 'active'
+      },
+      {
+        name: 'Milk 1L',
+        price: 3.49,
+        stock: 30,
+        category: 'Dairy Products',
+        businessUnitId: storeId,
+        barcode: '1234567891',
+        cost: 2.00,
+        minStockLevel: 5,
+        unit: 'liter',
+        status: 'active'
+      },
+      {
+        name: 'Bread',
+        price: 2.99,
+        stock: 25,
+        category: 'Bakery Items',
+        businessUnitId: storeId,
+        barcode: '1234567892',
+        cost: 1.20,
+        minStockLevel: 8,
+        unit: 'loaf',
+        status: 'active'
+      },
+      {
+        name: 'Orange Juice',
+        price: 4.99,
+        stock: 20,
+        category: 'Beverages',
+        businessUnitId: storeId,
+        barcode: '1234567893',
+        cost: 3.00,
+        minStockLevel: 6,
+        unit: 'liter',
+        status: 'active'
+      }
+    ];
+
+    for (const product of products) {
+      await storage.createProduct(product);
+    }
+
+    console.log('✅ Grocery data seeded successfully');
+  } catch (error) {
+    console.error('❌ Failed to seed grocery data:', error);
+  }
+}
+
+async function seedRestaurantData(storeId: string) {
+  try {
+    console.log(`🍽️ Seeding restaurant data for store ${storeId}`);
+
+    // Create menu items
+    const products = [
+      {
+        name: 'Caesar Salad',
+        price: 8.99,
+        stock: 100,
+        category: 'Appetizers',
+        businessUnitId: storeId,
+        barcode: '9876543210',
+        cost: 4.50,
+        minStockLevel: 0,
+        unit: 'portion',
+        status: 'active'
+      },
+      {
+        name: 'Grilled Chicken',
+        price: 15.99,
+        stock: 100,
+        category: 'Main Courses',
+        businessUnitId: storeId,
+        barcode: '9876543211',
+        cost: 8.00,
+        minStockLevel: 0,
+        unit: 'portion',
+        status: 'active'
+      },
+      {
+        name: 'Chocolate Cake',
+        price: 6.99,
+        stock: 100,
+        category: 'Desserts',
+        businessUnitId: storeId,
+        barcode: '9876543212',
+        cost: 3.50,
+        minStockLevel: 0,
+        unit: 'slice',
+        status: 'active'
+      },
+      {
+        name: 'Coffee',
+        price: 3.99,
+        stock: 100,
+        category: 'Beverages',
+        businessUnitId: storeId,
+        barcode: '9876543213',
+        cost: 1.00,
+        minStockLevel: 0,
+        unit: 'cup',
+        status: 'active'
+      }
+    ];
+
+    for (const product of products) {
+      await storage.createProduct(product);
+    }
+
+    console.log('✅ Restaurant data seeded successfully');
+  } catch (error) {
+    console.error('❌ Failed to seed restaurant data:', error);
+  }
+}
+
+async function ensureRestaurantBusinessUnit2(): Promise<string> {
+  const now = new Date().toISOString();
+
+  try {
+    const existing = await db
+      .select()
+      .from(businessUnits)
+      .where(eq(businessUnits.id, '2'))
+      .limit(1);
+
+    if (existing.length > 0) {
+      return existing[0].id;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    await db
+      .insert(businessUnits)
+      .values({
+        id: '2',
+        name: 'Restaurant',
+        type: 'restaurant',
+        settings: JSON.stringify({ location: 'Restaurant', phone: '' }),
+        isActive: 'true',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+  } catch (error) {
+    console.error('❌ Failed to create Restaurant business unit (id=2):', error);
+  }
+
+  return '2';
+}
+
+async function ensureRestaurantTables() {
+  try {
+    const now = new Date().toISOString();
+
+    // Final hardening: ensure current_order exists even if earlier migrations failed
+    try {
+      const info = await db.all(sql`PRAGMA table_info(tables)`);
+      const names = (info as any[]).map((c: any) => c.name);
+      if (!names.includes('current_order')) {
+        await db.run(sql`ALTER TABLE tables ADD COLUMN current_order TEXT`);
+        console.log('✅ Added current_order column to tables table');
+      }
+    } catch {
+      // ignore
+    }
+
+    await ensureRestaurantBusinessUnit2();
+    const units = await db.select().from(businessUnits);
+    const restaurantUnitIds = units
+      .filter((u: any) => {
+        const type = typeof u?.type === 'string' ? u.type.toLowerCase() : '';
+        const name = typeof u?.name === 'string' ? u.name.toLowerCase() : '';
+        return type === 'restaurant' || name === 'restaurant';
+      })
+      .map((u: any) => u.id);
+
+    for (const restaurantBusinessUnitId of restaurantUnitIds) {
+      const existing = await db
+        .select()
+        .from(tables)
+        .where(eq(tables.businessUnitId, restaurantBusinessUnitId));
+
+      if (existing.length >= 10) {
+        continue;
+      }
+
+      const existingNumbers = new Set(existing.map((t: any) => String(t.number)));
+      const toInsert = [] as any[];
+
+      for (let i = 1; i <= 10; i++) {
+        const num = String(i);
+        if (!existingNumbers.has(num)) {
+          toInsert.push({
+            number: num,
+            capacity: 4,
+            status: 'available',
+            currentOrder: null,
+            businessUnitId: restaurantBusinessUnitId,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+
+      if (toInsert.length > 0) {
+        await db.insert(tables).values(toInsert);
+        console.log(`✅ Seeded ${toInsert.length} restaurant tables for business unit ${restaurantBusinessUnitId}`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Failed to ensure restaurant tables:', error);
+  }
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -105,6 +401,7 @@ declare module "express-session" {
       id: string;
       name: string;
       role: 'owner' | 'manager' | 'cashier';
+      businessUnitId?: string;
     };
   }
 }
@@ -140,7 +437,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  
+
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
   } else {
@@ -187,12 +484,17 @@ app.use((req, res, next) => {
 
 import { db } from './lib/db';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { businessUnits, tables } from '../shared/schema';
+import { eq, sql } from 'drizzle-orm';
 
 (async () => {
   try {
+    await killPortPromise;
+
     // Run full Drizzle migrations on startup
     try {
       console.log('Applying database migrations...');
+      await ensureNonEmptySqlMigrations(path.join(process.cwd(), 'migrations'));
       await migrate(db, { migrationsFolder: "./migrations" });
       console.log('✅ Migrations applied successfully.');
     } catch (err) {
@@ -202,6 +504,8 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
       // be able to operate with an older schema for some functionalities.
     }
 
+    await runMigrations();
+
     await registerRoutes(httpServer, app);
 
     // Ensure DB seeded (defensive - storage.initialize already calls this,
@@ -209,6 +513,11 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
     // Initialize mock data
     try {
       // await initializeMockData();
+
+      // Seed default stores if none exist
+      await seedDefaultStores();
+
+      await ensureRestaurantTables();
     } catch (err) {
       console.error('Error seeding initial data:', err);
     }

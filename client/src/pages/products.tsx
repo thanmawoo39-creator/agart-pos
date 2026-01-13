@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/table';
 import { Package, Plus, Edit, Trash2, Search } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useBusinessMode } from '@/contexts/BusinessModeContext';
 
 interface Product {
   id: number;
@@ -44,6 +45,7 @@ interface Product {
 export default function Products() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { businessUnit } = useBusinessMode();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -62,23 +64,25 @@ export default function Products() {
 
   // Fetch products
   const { data: products = [], isLoading } = useQuery<Product[]>({
-    queryKey: ['/api/products'],
+    queryKey: [`/api/products?businessUnitId=${businessUnit}`],
+    enabled: !!businessUnit,
   });
 
   // Create product mutation
   const createMutation = useMutation({
     mutationFn: async (data: Partial<Product>) => {
+      if (!businessUnit) throw new Error('Business unit is not set');
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, businessUnitId: businessUnit }),
         credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to create product');
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      queryClient.invalidateQueries({ queryKey: [`/api/products?businessUnitId=${businessUnit}`] });
       toast({ title: 'Success', description: 'Product created successfully' });
       setIsAddDialogOpen(false);
       resetForm();
@@ -91,17 +95,18 @@ export default function Products() {
   // Update product mutation
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: Partial<Product> }) => {
+      if (!businessUnit) throw new Error('Business unit is not set');
       const res = await fetch(`/api/products/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, businessUnitId: businessUnit }),
         credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to update product');
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      queryClient.invalidateQueries({ queryKey: [`/api/products?businessUnitId=${businessUnit}`] });
       toast({ title: 'Success', description: 'Product updated successfully' });
       setEditingProduct(null);
       resetForm();
@@ -185,7 +190,7 @@ export default function Products() {
   // Filter products
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          product.barcode?.includes(searchTerm);
+      product.barcode?.includes(searchTerm);
     const matchesCategory = !selectedCategory || product.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });

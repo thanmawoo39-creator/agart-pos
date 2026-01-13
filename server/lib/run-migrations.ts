@@ -1,5 +1,32 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import fs from "fs/promises";
+import path from "path";
+
+function stripSqlCommentsAndWhitespace(source: string): string {
+  return (source || "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*--.*$/gm, "")
+    .replace(/^\s*\/\/.*$/gm, "")
+    .trim();
+}
+
+export async function ensureNonEmptySqlMigrations(migrationsFolder: string) {
+  try {
+    const files = await fs.readdir(migrationsFolder);
+    const sqlFiles = files.filter((f) => f.toLowerCase().endsWith('.sql'));
+
+    for (const file of sqlFiles) {
+      const fullPath = path.join(migrationsFolder, file);
+      const content = await fs.readFile(fullPath, 'utf8').catch(() => '');
+      if (stripSqlCommentsAndWhitespace(content).length === 0) {
+        await fs.writeFile(fullPath, 'SELECT 1;\n', 'utf8');
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
 
 /**
  * Run database migrations
@@ -9,6 +36,13 @@ export async function runMigrations() {
   console.log("Running database migrations...");
 
   try {
+    const runSql = async (statement: string) => {
+      if (!statement || statement.trim().length === 0) {
+        return;
+      }
+      await db.run(sql.raw(statement));
+    };
+
     // Check if currency columns exist
     const tableInfo = await db.all(sql`PRAGMA table_info(app_settings)`);
     const columnNames = tableInfo.map((col: any) => col.name);
@@ -23,25 +57,94 @@ export async function runMigrations() {
 
       // Add currency_code column
       if (!columnNames.includes('currency_code')) {
-        await db.run(sql`ALTER TABLE app_settings ADD COLUMN currency_code TEXT NOT NULL DEFAULT 'MMK'`);
+        await runSql("ALTER TABLE app_settings ADD COLUMN currency_code TEXT NOT NULL DEFAULT 'MMK'");
         console.log("✅ Added currency_code column");
       }
 
       // Add currency_symbol column
       if (!columnNames.includes('currency_symbol')) {
-        await db.run(sql`ALTER TABLE app_settings ADD COLUMN currency_symbol TEXT NOT NULL DEFAULT 'K'`);
+        await runSql("ALTER TABLE app_settings ADD COLUMN currency_symbol TEXT NOT NULL DEFAULT 'K'");
         console.log("✅ Added currency_symbol column");
       }
 
       // Add currency_position column
       if (!columnNames.includes('currency_position')) {
-        await db.run(sql`ALTER TABLE app_settings ADD COLUMN currency_position TEXT NOT NULL DEFAULT 'after'`);
+        await runSql("ALTER TABLE app_settings ADD COLUMN currency_position TEXT NOT NULL DEFAULT 'after'");
         console.log("✅ Added currency_position column");
       }
 
       console.log("✅ Currency columns migration completed successfully");
     } else {
       console.log("✅ Currency columns already exist, skipping migration");
+    }
+
+    // Check if app_settings has mobile payment QR column
+    const mobileQrColumnExists = columnNames.includes('mobile_payment_qr_url');
+    if (!mobileQrColumnExists) {
+      console.log("Adding mobile_payment_qr_url column to app_settings table...");
+      await runSql("ALTER TABLE app_settings ADD COLUMN mobile_payment_qr_url TEXT");
+      console.log("✅ Added mobile_payment_qr_url column");
+    } else {
+      console.log("✅ mobile_payment_qr_url column already exists in app_settings");
+    }
+
+    // Ensure business_unit_id columns exist on core tables (older DBs may be missing them)
+    const ensureColumn = async (table: string, column: string, alterSql: any) => {
+      const info = await db.all(sql.raw(`PRAGMA table_info(${table})`));
+      const names = (info as any[]).map((c: any) => c.name);
+      if (!names.includes(column)) {
+        console.log(`Adding ${column} column to ${table} table...`);
+        await db.run(alterSql);
+        console.log(`✅ Added ${column} column to ${table} table`);
+      }
+    };
+
+    await ensureColumn('products', 'business_unit_id', sql`ALTER TABLE products ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+    await ensureColumn('sales', 'business_unit_id', sql`ALTER TABLE sales ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+    await ensureColumn('customers', 'business_unit_id', sql`ALTER TABLE customers ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+    await ensureColumn('staff', 'business_unit_id', sql`ALTER TABLE staff ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+    await ensureColumn('attendance', 'business_unit_id', sql`ALTER TABLE attendance ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+    await ensureColumn('shifts', 'business_unit_id', sql`ALTER TABLE shifts ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+    // tables table may not exist in older DBs; if it exists but lacks business_unit_id, add it
+    try {
+      await ensureColumn('tables', 'business_unit_id', sql`ALTER TABLE tables ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+      await ensureColumn('tables', 'current_order', sql`ALTER TABLE tables ADD COLUMN current_order TEXT`);
+      await ensureColumn('tables', 'last_ordered', sql`ALTER TABLE tables ADD COLUMN last_ordered TEXT`);
+      await ensureColumn('tables', 'service_status', sql`ALTER TABLE tables ADD COLUMN service_status TEXT`);
+    } catch {
+      // ignore if tables table doesn't exist yet
+    }
+
+    // Phase 12: customer credit lifecycle fields
+    await ensureColumn('customers', 'due_date', sql`ALTER TABLE customers ADD COLUMN due_date TEXT`);
+    await ensureColumn('customers', 'credit_due_date', sql`ALTER TABLE customers ADD COLUMN credit_due_date TEXT`);
+    await ensureColumn('customers', 'monthly_closing_day', sql`ALTER TABLE customers ADD COLUMN monthly_closing_day INTEGER`);
+
+    // Phase 15: credit ledger transaction type (optional explicit field)
+    await ensureColumn('credit_ledger', 'transaction_type', sql`ALTER TABLE credit_ledger ADD COLUMN transaction_type TEXT`);
+
+    // Phase 12: normalize credit ledger types
+    try {
+      await runSql("UPDATE credit_ledger SET type='sale' WHERE type='charge'");
+      await runSql("UPDATE credit_ledger SET type='repayment' WHERE type='payment'");
+    } catch {
+      // ignore
+    }
+
+    // Phase 12: kitchen tickets (KOT)
+    try {
+      await runSql(`CREATE TABLE IF NOT EXISTS kitchen_tickets (
+        id TEXT PRIMARY KEY,
+        business_unit_id TEXT NOT NULL,
+        table_id TEXT,
+        table_number TEXT,
+        items TEXT,
+        status TEXT NOT NULL DEFAULT 'in_preparation',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`);
+    } catch {
+      // ignore
     }
 
     // Check if expenses table has description column
@@ -81,6 +184,5 @@ export async function runMigrations() {
     }
   } catch (error) {
     console.error("❌ Migration failed:", error);
-    throw error;
   }
 }

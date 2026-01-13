@@ -109,9 +109,15 @@ export default function SettingsPage() {
       const response = await fetch(`${API_BASE_URL}/api/settings/upload-qr`, {
         method: 'POST',
         body: formData,
+        credentials: 'include',
       });
 
+      const result = await response.json().catch(() => ({}));
+
       if (response.ok) {
+        if (result?.url) {
+          setFormData(prev => ({ ...prev, mobilePaymentQrUrl: result.url }));
+        }
         setQrUploadSuccess(true);
         // Clear the file input
         if (fileInputRef.current) {
@@ -124,7 +130,7 @@ export default function SettingsPage() {
           description: "Mobile payment QR code has been updated successfully.",
         });
       } else {
-        throw new Error('Failed to upload QR code');
+        throw new Error(result?.error || 'Failed to upload QR code');
       }
     } catch (error) {
       console.error('QR upload error:', error);

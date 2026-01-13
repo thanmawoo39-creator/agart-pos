@@ -6,7 +6,8 @@ declare module 'express-serve-static-core' {
     user?: {
       id: string;
       name: string;
-      role: 'owner' | 'manager' | 'cashier';
+      role: 'owner' | 'manager' | 'cashier' | 'kitchen';
+      businessUnitId?: string;
     };
   }
 }
@@ -32,7 +33,7 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
  * Admin (owner) has access to everything
  * Returns 403 if user doesn't have required role
  */
-export function requireRole(...allowedRoles: Array<'owner' | 'manager' | 'cashier'>) {
+export function requireRole(...allowedRoles: Array<'owner' | 'manager' | 'cashier' | 'kitchen'>) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({

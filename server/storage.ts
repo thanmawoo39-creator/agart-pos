@@ -3,6 +3,9 @@ import type {
   Customer,
   Sale,
   CreditLedger,
+  KitchenTicket,
+  InsertKitchenTicket,
+  KitchenTicketStatus,
   CurrentShift,
   SaleItem,
   InsertSale,
@@ -24,8 +27,9 @@ import type {
   Staff,
   InsertStaff,
   EnrichedCreditLedger,
+  BusinessUnit,
 } from "../shared/schema";
-import { 
+import {
   products,
   customers,
   sales,
@@ -38,9 +42,14 @@ import {
   appSettings,
   alerts,
   shifts,
+  tables,
+  businessUnits,
+  kitchenTickets,
 } from "../shared/schema";
+
+import crypto from "crypto";
 import { db } from "./lib/db";
-import { eq, desc, and, gte, lte, sql, sum, count } from "drizzle-orm";
+import { eq, desc, and, or, isNull, gte, lte, sql, sum, count } from "drizzle-orm";
 import { hashPin, verifyPin } from './lib/auth';
 
 export interface IStorage {
@@ -66,6 +75,12 @@ export interface IStorage {
   // Credit Ledger
   getCreditLedger(): Promise<CreditLedger[]>;
   createCreditLedgerEntry(entry: InsertCreditLedger): Promise<CreditLedger>;
+  applyCustomerRepayment(input: {
+    customerId: string;
+    amount: number;
+    description?: string | null;
+    createdBy?: string | null;
+  }): Promise<{ customer: Customer; ledgerEntry: CreditLedger }>;
 
   // Staff
   getStaff(): Promise<Staff[]>;
@@ -112,6 +127,40 @@ export interface IStorage {
   // Dashboard
   getDashboardSummary(): Promise<DashboardSummary>;
 
+  // Tables
+  getTables(): Promise<any[]>;
+  updateTableStatus(tableId: string, status: 'available' | 'occupied' | 'reserved'): Promise<any | null | undefined>;
+  updateTableOrder(tableId: string, currentOrder: string | null): Promise<any | null | undefined>;
+  updateTableServiceStatus(tableId: string, serviceStatus: 'ordered' | 'served' | 'billing' | null): Promise<any | null | undefined>;
+  orderTableAndCreateKitchenTicket(input: {
+    businessUnitId: string;
+    tableId: string;
+    tableNumber?: string | null;
+    cart: any[];
+  }): Promise<{
+    table: any;
+    ticket: KitchenTicket;
+    newItems: any[];
+    alreadyOrdered: any[];
+  }>;
+
+  // Kitchen Tickets
+  getKitchenTickets(businessUnitId: string): Promise<KitchenTicket[]>;
+  createOrUpdateKitchenTicketForTable(input: {
+    businessUnitId: string;
+    tableId: string;
+    tableNumber?: string | null;
+    items: string | null;
+  }): Promise<KitchenTicket>;
+  updateKitchenTicketStatus(id: string, status: KitchenTicketStatus): Promise<KitchenTicket | null | undefined>;
+
+  // Business Units
+  getBusinessUnits(): Promise<BusinessUnit[]>;
+  getBusinessUnit(id: string): Promise<BusinessUnit | null | undefined>;
+  createBusinessUnit(businessUnit: any): Promise<BusinessUnit>;
+  updateBusinessUnit(id: string, updates: Partial<any>): Promise<BusinessUnit | null | undefined>;
+  deleteBusinessUnit(id: string): Promise<boolean>;
+
   // Analytics
   getAnalyticsSummary(): Promise<{
     todaySales: number;
@@ -157,6 +206,7 @@ export class POSStorage implements IStorage {
       imageUrl: product.imageUrl || null,
       cost: product.cost ?? null,
       status: 'active', // Always create as active
+      businessUnitId: product.businessUnitId || null, // Include business unit
     };
 
     const [newProduct] = await db.insert(products).values(productData).returning();
@@ -260,101 +310,103 @@ export class POSStorage implements IStorage {
 
   createSale(insertSale: InsertSale): Sale {
     const saleResult = db.transaction((tx) => {
-        // 1. Validate Stock & Calculate Totals
-        let calculatedTotal = 0;
-        const productCache = new Map<string, Product>();
+      // 1. Validate Stock & Calculate Totals
+      let calculatedTotal = 0;
+      const productCache = new Map<string, Product>();
 
-        for (const item of insertSale.items) {
-            const product = tx.select().from(products).where(eq(products.id, item.productId)).get();
+      for (const item of insertSale.items) {
+        const product = tx.select().from(products).where(eq(products.id, item.productId)).get();
 
-            if (!product) {
-                throw new Error(`Product not found: ID ${item.productId}`);
-            }
-            if (product.stock < item.quantity) {
-                throw new Error(`Insufficient stock for ${product.name}. Requested: ${item.quantity}, Available: ${product.stock}`);
-            }
-            productCache.set(item.productId, product);
-            calculatedTotal += (item.unitPrice * item.quantity);
+        if (!product) {
+          throw new Error(`Product not found: ID ${item.productId}`);
         }
+        if (product.stock < item.quantity) {
+          throw new Error(`Insufficient stock for ${product.name}. Requested: ${item.quantity}, Available: ${product.stock}`);
+        }
+        productCache.set(item.productId, product);
+        calculatedTotal += (item.unitPrice * item.quantity);
+      }
 
-        // 2. Create Sale Record (without items)
-        const { items, ...saleData } = insertSale;
-        const saleToInsert = {
-            ...saleData,
-            total: calculatedTotal,
+      // 2. Create Sale Record (without items)
+      const { items, ...saleData } = insertSale;
+      const saleToInsert = {
+        ...saleData,
+        total: calculatedTotal,
+        timestamp: new Date().toISOString(),
+        businessUnitId: saleData.businessUnitId, // Include business unit (required)
+      };
+      const newSale = tx.insert(sales).values(saleToInsert).returning().get();
+
+      // 3. Create Sale Items & Update Stock
+      for (const item of items) {
+        tx.insert(saleItems).values({
+          saleId: newSale.id,
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          total: item.total
+        }).run();
+
+        const product = productCache.get(item.productId);
+        if (product) {
+          tx.update(products)
+            .set({ stock: product.stock - item.quantity })
+            .where(eq(products.id, item.productId))
+            .run();
+
+          tx.insert(inventoryLogs).values({
+            productId: item.productId,
+            productName: product.name,
+            quantityChanged: -item.quantity,
+            previousStock: product.stock,
+            currentStock: product.stock - item.quantity,
+            type: 'sale',
+            timestamp: new Date().toISOString()
+          }).run();
+        }
+      }
+
+      // 4. Handle Credit/Debt
+      if (insertSale.paymentMethod === 'credit' && insertSale.customerId) {
+        const customer = tx.select().from(customers).where(eq(customers.id, insertSale.customerId)).get();
+        if (customer) {
+          const newBalance = (customer.currentBalance || 0) + calculatedTotal;
+
+          // Update customer balance
+          tx.update(customers)
+            .set({ currentBalance: newBalance })
+            .where(eq(customers.id, customer.id))
+            .run();
+
+          // Create credit ledger entry with all required fields
+          tx.insert(creditLedger).values({
+            customerId: customer.id,
+            customerName: customer.name,
+            amount: calculatedTotal,
+            type: 'sale', // Changed from 'charge' to 'sale'
+            balanceAfter: newBalance,
+            description: `Sale - ${insertSale.items.length} item(s)`,
+            saleId: newSale.id,
+            voucherImageUrl: insertSale.paymentSlipUrl || null,
             timestamp: new Date().toISOString(),
-        };
-        const newSale = tx.insert(sales).values(saleToInsert).returning().get();
-
-        // 3. Create Sale Items & Update Stock
-        for (const item of items) {
-            tx.insert(saleItems).values({
-                saleId: newSale.id,
-                productId: item.productId,
-                productName: item.productName,
-                quantity: item.quantity,
-                unitPrice: item.unitPrice,
-                total: item.total
-            }).run();
-
-            const product = productCache.get(item.productId);
-            if (product) {
-                tx.update(products)
-                    .set({ stock: product.stock - item.quantity })
-                    .where(eq(products.id, item.productId))
-                    .run();
-
-                tx.insert(inventoryLogs).values({
-                    productId: item.productId,
-                    productName: product.name,
-                    quantityChanged: -item.quantity,
-                    previousStock: product.stock,
-                    currentStock: product.stock - item.quantity,
-                    type: 'sale',
-                    timestamp: new Date().toISOString()
-                }).run();
-            }
+            createdBy: insertSale.createdBy || null,
+          }).run();
         }
+      }
 
-        // 4. Handle Credit/Debt
-        if (insertSale.paymentMethod === 'credit' && insertSale.customerId) {
-            const customer = tx.select().from(customers).where(eq(customers.id, insertSale.customerId)).get();
-            if (customer) {
-                const newBalance = (customer.currentBalance || 0) + calculatedTotal;
-
-                // Update customer balance
-                tx.update(customers)
-                    .set({ currentBalance: newBalance })
-                    .where(eq(customers.id, customer.id))
-                    .run();
-
-                // Create credit ledger entry with all required fields
-                tx.insert(creditLedger).values({
-                    customerId: customer.id,
-                    customerName: customer.name,
-                    amount: calculatedTotal,
-                    type: 'charge',
-                    balanceAfter: newBalance,
-                    description: `Sale - ${insertSale.items.length} item(s)`,
-                    saleId: newSale.id,
-                    voucherImageUrl: insertSale.paymentSlipUrl || null,
-                    timestamp: new Date().toISOString(),
-                    createdBy: insertSale.createdBy || null,
-                }).run();
-            }
-        }
-
-        return newSale;
+      return newSale;
     });
 
     return {
-        ...saleResult,
-        items: insertSale.items,
-        customerId: saleResult.customerId ?? undefined,
-        storeId: saleResult.storeId ?? undefined,
-        staffId: saleResult.staffId ?? undefined,
-        createdBy: saleResult.createdBy ?? undefined,
-        paymentSlipUrl: saleResult.paymentSlipUrl ?? undefined,
+      // ...
+      ...saleResult,
+      items: insertSale.items,
+      customerId: saleResult.customerId ?? undefined,
+      storeId: saleResult.storeId ?? undefined,
+      staffId: saleResult.staffId ?? undefined,
+      createdBy: saleResult.createdBy ?? undefined,
+      paymentSlipUrl: saleResult.paymentSlipUrl ?? undefined,
     };
   }
 
@@ -369,12 +421,61 @@ export class POSStorage implements IStorage {
   }
 
   async createCreditLedgerEntry(entry: InsertCreditLedger): Promise<CreditLedger> {
-    const [newEntry] = await db.insert(creditLedger).values(entry).returning();
+    const toInsert: any = {
+      ...(entry as any),
+      transactionType: (entry as any).transactionType ?? (entry as any).type,
+    };
+    const [newEntry] = await db.insert(creditLedger).values(toInsert).returning();
     return {
       ...newEntry,
       saleId: newEntry.saleId || undefined,
       voucherImageUrl: newEntry.voucherImageUrl || undefined,
     };
+  }
+
+  async applyCustomerRepayment(input: {
+    customerId: string;
+    amount: number;
+    description?: string | null;
+    createdBy?: string | null;
+  }): Promise<{ customer: Customer; ledgerEntry: CreditLedger }> {
+    const result = db.transaction((tx) => {
+      const customer = tx.select().from(customers).where(eq(customers.id, input.customerId)).get() as any;
+      if (!customer) {
+        throw new Error('Customer not found');
+      }
+
+      const amount = Number(input.amount) || 0;
+      if (amount <= 0) {
+        throw new Error('Invalid repayment amount');
+      }
+
+      const newBalance = Math.max(0, Number(customer.currentBalance || 0) - amount);
+      const now = new Date().toISOString();
+
+      const entry = tx.insert(creditLedger).values({
+        customerId: customer.id,
+        customerName: customer.name,
+        type: 'repayment',
+        transactionType: 'repayment',
+        amount: -amount,
+        balanceAfter: newBalance,
+        description: input.description ?? 'Debt Repayment',
+        timestamp: now,
+        createdAt: now,
+        createdBy: input.createdBy ?? null,
+      } as any).returning().get() as any;
+
+      const updatedCustomer = tx.update(customers)
+        .set({ currentBalance: newBalance, updatedAt: now } as any)
+        .where(eq(customers.id, customer.id))
+        .returning()
+        .get() as any;
+
+      return { customer: updatedCustomer, ledgerEntry: entry };
+    });
+
+    return Promise.resolve(result as any);
   }
 
   // Staff
@@ -402,6 +503,11 @@ export class POSStorage implements IStorage {
     return staffMember;
   }
 
+  async getStaffById(id: string): Promise<Staff | null | undefined> {
+    const [staffMember] = await db.select().from(staff).where(eq(staff.id, id));
+    return staffMember;
+  }
+
   async createStaff(staffData: InsertStaff): Promise<Staff> {
     const hashedPassword = hashPin(staffData.pin);
     const result = await db.insert(staff).values({
@@ -409,6 +515,7 @@ export class POSStorage implements IStorage {
       pin: hashedPassword,
       role: staffData.role,
       barcode: staffData.barcode || null,
+      businessUnitId: staffData.businessUnitId, // Include business unit (required)
       status: staffData.status || 'active',
     }).returning();
     return result[0] as Staff;
@@ -447,8 +554,25 @@ export class POSStorage implements IStorage {
     return await db.select().from(attendance).where(eq(attendance.staffId, staffId));
   }
 
-  async getCurrentShift(): Promise<CurrentShift> {
-    const [active] = await db.select().from(attendance).where(eq(attendance.clockOutTime, '')).limit(1);
+  async getAttendanceById(id: string): Promise<Attendance | null | undefined> {
+    const [attendanceRecord] = await db.select().from(attendance).where(eq(attendance.id, id));
+    return attendanceRecord;
+  }
+
+  async getCurrentShift(userId?: string): Promise<CurrentShift> {
+    const conditions: any[] = [
+      or(eq(attendance.clockOutTime, ''), isNull(attendance.clockOutTime)),
+    ];
+    if (userId) {
+      conditions.push(eq(attendance.staffId, userId));
+    }
+
+    const [active] = await db
+      .select()
+      .from(attendance)
+      .where(and(...conditions))
+      .orderBy(desc(attendance.clockInTime))
+      .limit(1);
     if (active) {
       return {
         isActive: true,
@@ -456,18 +580,21 @@ export class POSStorage implements IStorage {
         staffName: active.staffName || null,
         clockInTime: active.clockInTime || null,
         attendanceId: active.id,
+        businessUnitId: active.businessUnitId || null,
       };
     }
+
     return {
       isActive: false,
       staffId: null,
       staffName: null,
       clockInTime: null,
       attendanceId: null,
+      businessUnitId: null,
     };
   }
 
-  async clockIn(staffId: string, staffName: string, openingCash: number = 0): Promise<Attendance> {
+  async clockIn(staffId: string, staffName: string, openingCash: number = 0, businessUnitId?: string): Promise<Attendance> {
     const [newAttendance] = await db.insert(attendance).values({
       staffId,
       staffName,
@@ -481,20 +608,23 @@ export class POSStorage implements IStorage {
       cardSales: 0,
       creditSales: 0,
       mobileSales: 0,
+      businessUnitId,
     }).returning();
     return newAttendance;
   }
 
   async clockOut(attendanceId: string): Promise<Attendance | null | undefined> {
-    const attendanceRecord = await this.getAttendanceByStaff(attendanceId);
-    if (!attendanceRecord || attendanceRecord.length === 0) return null;
-    
-    const clockOutTime = new Date().toISOString();
-    const clockInTime = attendanceRecord[0].clockInTime;
-    const totalHours = clockInTime ? 
-      (new Date(clockOutTime).getTime() - new Date(clockInTime).getTime()) / (1000 * 60 * 60) : 0;
+    const attendanceRecord = await this.getAttendanceById(attendanceId);
+    if (!attendanceRecord) return null;
 
-    const [updated] = await db.update(attendance)
+    const clockOutTime = new Date().toISOString();
+    const clockInTime = attendanceRecord.clockInTime;
+    const totalHours = clockInTime
+      ? (new Date(clockOutTime).getTime() - new Date(clockInTime).getTime()) / (1000 * 60 * 60)
+      : 0;
+
+    const [updated] = await db
+      .update(attendance)
       .set({ clockOutTime, totalHours })
       .where(eq(attendance.id, attendanceId))
       .returning();
@@ -660,6 +790,228 @@ export class POSStorage implements IStorage {
     };
   }
 
+  // Tables
+  async getTables(): Promise<any[]> {
+    return await db.select().from(tables).orderBy(tables.number);
+  }
+
+  async updateTableStatus(tableId: string, status: 'available' | 'occupied' | 'reserved'): Promise<any | null | undefined> {
+    const [updated] = await db
+      .update(tables)
+      .set({ status, updatedAt: new Date().toISOString() })
+      .where(eq(tables.id, tableId))
+      .returning();
+    return updated;
+  }
+
+  async updateTableOrder(tableId: string, currentOrder: string | null): Promise<any | null | undefined> {
+    const now = new Date().toISOString();
+    const setData: any = { currentOrder, updatedAt: now };
+    if (currentOrder === null) {
+      setData.lastOrdered = null;
+      setData.serviceStatus = null;
+    }
+
+    const [updated] = await db
+      .update(tables)
+      .set(setData)
+      .where(eq(tables.id, tableId))
+      .returning();
+    return updated;
+  }
+
+  async updateTableServiceStatus(tableId: string, serviceStatus: 'ordered' | 'served' | 'billing' | null): Promise<any | null | undefined> {
+    const [updated] = await db
+      .update(tables)
+      .set({ serviceStatus, updatedAt: new Date().toISOString() } as any)
+      .where(eq(tables.id, tableId))
+      .returning();
+    return updated;
+  }
+
+  async orderTableAndCreateKitchenTicket(input: {
+    businessUnitId: string;
+    tableId: string;
+    tableNumber?: string | null;
+    cart: any[];
+  }): Promise<{ table: any; ticket: KitchenTicket; newItems: any[]; alreadyOrdered: any[] }> {
+    const now = new Date().toISOString();
+
+    const existingTableRows = await db
+      .select()
+      .from(tables)
+      .where(and(eq(tables.id, input.tableId), eq(tables.businessUnitId, input.businessUnitId)))
+      .limit(1);
+
+    const existingTable = existingTableRows[0];
+    if (!existingTable) {
+      throw new Error('Table not found');
+    }
+
+    const safeParseArray = (val: any): any[] => {
+      if (typeof val !== 'string' || val.trim().length === 0) return [];
+      try {
+        const parsed = JSON.parse(val);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const prevCart = safeParseArray((existingTable as any).lastOrdered);
+
+    const keyOf = (it: any) => String(it?.productId || it?.id || it?.product_id || it?.name || crypto.randomUUID());
+
+    const prevMap = new Map<string, number>();
+    for (const it of prevCart) {
+      const k = keyOf(it);
+      const q = Number(it?.quantity) || 0;
+      prevMap.set(k, (prevMap.get(k) || 0) + q);
+    }
+
+    const newItems: any[] = [];
+    const alreadyOrdered: any[] = [];
+
+    for (const it of input.cart || []) {
+      const k = keyOf(it);
+      const currentQty = Number(it?.quantity) || 0;
+      const prevQty = prevMap.get(k) || 0;
+      const delta = currentQty - prevQty;
+
+      if (prevQty > 0) {
+        alreadyOrdered.push({ ...it, quantity: Math.min(prevQty, currentQty) });
+      }
+      if (delta > 0) {
+        newItems.push({ ...it, quantity: delta });
+      }
+    }
+
+    if (newItems.length === 0) {
+      throw new Error('No new items to order');
+    }
+
+    const serialized = JSON.stringify(input.cart || []);
+    const [updatedTable] = await db
+      .update(tables)
+      .set({
+        currentOrder: serialized,
+        lastOrdered: serialized,
+        serviceStatus: 'ordered',
+        updatedAt: now,
+      } as any)
+      .where(eq(tables.id, input.tableId))
+      .returning();
+
+    const ticketPayload = {
+      newItems,
+      alreadyOrdered,
+      orderedAt: now,
+    };
+
+    const [ticket] = await db
+      .insert(kitchenTickets)
+      .values({
+        id: crypto.randomUUID(),
+        businessUnitId: input.businessUnitId,
+        tableId: input.tableId,
+        tableNumber: input.tableNumber ?? null,
+        items: JSON.stringify(ticketPayload),
+        status: 'in_preparation',
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+      .returning();
+
+    return { table: updatedTable, ticket: ticket as any, newItems, alreadyOrdered };
+  }
+
+  // Kitchen Tickets
+  async getKitchenTickets(businessUnitId: string): Promise<KitchenTicket[]> {
+    const rows = await db
+      .select()
+      .from(kitchenTickets)
+      .where(eq(kitchenTickets.businessUnitId, businessUnitId))
+      .orderBy(desc(kitchenTickets.createdAt));
+    return rows as any;
+  }
+
+  async createOrUpdateKitchenTicketForTable(input: {
+    businessUnitId: string;
+    tableId: string;
+    tableNumber?: string | null;
+    items: string | null;
+  }): Promise<KitchenTicket> {
+    const now = new Date().toISOString();
+
+    const existing = await db
+      .select()
+      .from(kitchenTickets)
+      .where(
+        and(
+          eq(kitchenTickets.businessUnitId, input.businessUnitId),
+          eq(kitchenTickets.tableId, input.tableId),
+          eq(kitchenTickets.status, 'in_preparation')
+        )
+      )
+      .limit(1);
+
+    if (existing.length > 0) {
+      const [updated] = await db
+        .update(kitchenTickets)
+        .set({
+          tableNumber: input.tableNumber ?? null,
+          items: input.items,
+          updatedAt: now,
+        })
+        .where(eq(kitchenTickets.id, existing[0].id))
+        .returning();
+      return updated as any;
+    }
+
+    const toInsert: InsertKitchenTicket = {
+      businessUnitId: input.businessUnitId,
+      tableId: input.tableId,
+      tableNumber: input.tableNumber ?? null,
+      items: input.items,
+      status: 'in_preparation',
+    };
+
+    const [created] = await db
+      .insert(kitchenTickets)
+      .values({
+        ...(toInsert as any),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    return created as any;
+  }
+
+  async updateKitchenTicketStatus(id: string, status: KitchenTicketStatus): Promise<KitchenTicket | null | undefined> {
+    const [updated] = await db
+      .update(kitchenTickets)
+      .set({ status, updatedAt: new Date().toISOString() })
+      .where(eq(kitchenTickets.id, id))
+      .returning();
+    if (updated?.tableId) {
+      try {
+        const rows = await db.select().from(tables).where(eq(tables.id, updated.tableId as any)).limit(1);
+        const t = rows[0] as any;
+        if (t && t.serviceStatus !== 'billing') {
+          const next = status === 'served' ? 'served' : 'ordered';
+          await db.update(tables)
+            .set({ serviceStatus: next, updatedAt: new Date().toISOString() } as any)
+            .where(eq(tables.id, updated.tableId as any));
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return updated as any;
+  }
+
   // App Settings
   async getAppSettings(): Promise<AppSettings> {
     const [setting] = await db.select().from(appSettings).limit(1);
@@ -806,10 +1158,10 @@ export class POSStorage implements IStorage {
   }> {
     const today = new Date().toISOString().split('T')[0];
     const startOfToday = new Date(today).toISOString();
-    
+
     // Get current month start
     const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
-    
+
     // Today's sales
     const todaySalesData = await db.select({ total: sum(sales.total), count: count() })
       .from(sales)
@@ -908,7 +1260,11 @@ export class POSStorage implements IStorage {
     // Get total sales
     const totalSalesData = await db.select({ total: sum(sales.total) })
       .from(sales)
-      .where(and(gte(sales.timestamp, startTime), lte(sales.timestamp, endTime)));
+      .where(and(
+        gte(sales.timestamp, startTime),
+        lte(sales.timestamp, endTime),
+        eq(sales.staffId, shiftRecord.staffId)
+      ));
 
     // Get cash sales
     const cashSalesData = await db.select({ total: sum(sales.total) })
@@ -916,7 +1272,8 @@ export class POSStorage implements IStorage {
       .where(and(
         eq(sales.paymentMethod, 'cash'),
         gte(sales.timestamp, startTime),
-        lte(sales.timestamp, endTime)
+        lte(sales.timestamp, endTime),
+        eq(sales.staffId, shiftRecord.staffId)
       ));
 
     // Get card sales
@@ -925,7 +1282,8 @@ export class POSStorage implements IStorage {
       .where(and(
         eq(sales.paymentMethod, 'card'),
         gte(sales.timestamp, startTime),
-        lte(sales.timestamp, endTime)
+        lte(sales.timestamp, endTime),
+        eq(sales.staffId, shiftRecord.staffId)
       ));
 
     // Get credit sales
@@ -934,7 +1292,18 @@ export class POSStorage implements IStorage {
       .where(and(
         eq(sales.paymentMethod, 'credit'),
         gte(sales.timestamp, startTime),
-        lte(sales.timestamp, endTime)
+        lte(sales.timestamp, endTime),
+        eq(sales.staffId, shiftRecord.staffId)
+      ));
+
+    // Get mobile sales
+    const mobileSalesData = await db.select({ total: sum(sales.total) })
+      .from(sales)
+      .where(and(
+        eq(sales.paymentMethod, 'mobile'),
+        gte(sales.timestamp, startTime),
+        lte(sales.timestamp, endTime),
+        eq(sales.staffId, shiftRecord.staffId)
       ));
 
     const [updated] = await db.update(shifts)
@@ -946,11 +1315,52 @@ export class POSStorage implements IStorage {
         cashSales: Number(cashSalesData[0]?.total || 0),
         cardSales: Number(cardSalesData[0]?.total || 0),
         creditSales: Number(creditSalesData[0]?.total || 0),
+        mobileSales: Number(mobileSalesData[0]?.total || 0),
       })
       .where(eq(shifts.id, shiftId))
       .returning();
 
     return updated;
+  }
+
+  // Business Units
+  async getBusinessUnits(): Promise<BusinessUnit[]> {
+    return await db.select().from(businessUnits).where(eq(businessUnits.isActive, 'true')).orderBy(businessUnits.name);
+  }
+
+  async getBusinessUnit(id: string): Promise<BusinessUnit | null | undefined> {
+    const [businessUnit] = await db.select().from(businessUnits).where(eq(businessUnits.id, id));
+    return businessUnit;
+  }
+
+  async createBusinessUnit(businessUnitData: Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">): Promise<BusinessUnit> {
+    const newBusinessUnitData = {
+      ...businessUnitData,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const [newBusinessUnit] = await db.insert(businessUnits).values(newBusinessUnitData).returning();
+    return newBusinessUnit;
+  }
+
+  async updateBusinessUnit(id: string, updates: Partial<Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">>): Promise<BusinessUnit | null | undefined> {
+    const updateData = {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+    const [updated] = await db.update(businessUnits)
+      .set(updateData)
+      .where(eq(businessUnits.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteBusinessUnit(id: string): Promise<boolean> {
+    const [updated] = await db.update(businessUnits)
+      .set({ isActive: 'false', updatedAt: new Date().toISOString() })
+      .where(eq(businessUnits.id, id))
+      .returning();
+    return !!updated;
   }
 
   // Initialize with mock data

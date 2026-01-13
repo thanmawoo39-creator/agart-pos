@@ -72,11 +72,14 @@ export const useStore = create<AppState>()(
           }
 
           const newItem: CartItem = {
+            id: crypto.randomUUID(),
             productId: product.id,
             productName: product.name,
             quantity,
             unitPrice: product.price,
             total: product.price * quantity,
+            name: product.name,
+            price: product.price,
             product,
           };
 

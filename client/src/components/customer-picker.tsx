@@ -2,6 +2,7 @@ import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Combobox } from "@/components/ui/combobox";
 import { apiRequest } from "@/lib/queryClient";
+import { useBusinessMode } from "@/contexts/BusinessModeContext";
 import type { Customer } from "@shared/schema";
 
 interface CustomerPickerProps {
@@ -9,10 +10,15 @@ interface CustomerPickerProps {
 }
 
 export function CustomerPicker({ onSelectCustomer }: CustomerPickerProps) {
+  const { businessUnit } = useBusinessMode();
+  const businessUnitId = businessUnit;
+
   const { data: customers, isLoading } = useQuery<Customer[]>({
-    queryKey: ["/api/customers"],
+    queryKey: [`/api/customers?businessUnitId=${businessUnitId}`],
+    enabled: !!businessUnitId,
     queryFn: async () => {
-      const response = await apiRequest("GET", "/api/customers");
+      if (!businessUnitId) return [];
+      const response = await apiRequest("GET", `/api/customers?businessUnitId=${businessUnitId}`);
       const data = await response.json();
       if (!Array.isArray(data)) {
         return [];
@@ -24,9 +30,9 @@ export function CustomerPicker({ onSelectCustomer }: CustomerPickerProps) {
   const customerOptions = React.useMemo(() => {
     return Array.isArray(customers)
       ? customers.map((c) => ({
-          value: c.id,
-          label: `${c.name} (${c.phone || "No phone"})`,
-        }))
+        value: c.id,
+        label: `${c.name} (${c.phone || "No phone"})`,
+      }))
       : [];
   }, [customers]);
 

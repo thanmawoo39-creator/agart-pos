@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import type { Staff, StaffRole, StaffSession } from "@shared/schema";
+import { useBusinessMode } from "@/contexts/BusinessModeContext";
 
 interface AuthContextType {
   currentStaff: Staff | null;
@@ -11,6 +12,7 @@ interface AuthContextType {
   isOwner: boolean;
   isManager: boolean;
   isCashier: boolean;
+  isKitchen: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -42,6 +44,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const currentStaff = session?.staff ?? null;
   const isLoggedIn = currentStaff !== null;
+  const { setBusinessUnit } = useBusinessMode();
+
+  // Ensure business unit context always matches the logged-in staff (including on refresh/session restore)
+  useEffect(() => {
+    if (currentStaff?.businessUnitId) {
+      const alreadySelected = !!localStorage.getItem('activeBusinessUnitId');
+      if (currentStaff.role === 'kitchen' || !alreadySelected) {
+        setBusinessUnit(currentStaff.businessUnitId);
+      }
+    }
+  }, [currentStaff?.businessUnitId, setBusinessUnit]);
 
   useEffect(() => {
     if (session) {
@@ -70,12 +83,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Network error - in PWA mode, this might be expected
           // Don't clear session immediately, but log the issue
           console.warn("Failed to verify session (possible PWA network issue):", error);
-          
+
           // If we're in standalone mode and verification fails, 
           // we should still allow the session but mark it for re-verification
-          const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
-                              (window.navigator as any).standalone;
-          
+          const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+            (window.navigator as any).standalone;
+
           if (!isStandalone) {
             // Only clear session in browser mode, not PWA mode
             setSession(null);
@@ -104,17 +117,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         staff: data.staff,
         loginTime: data.loginTime,
       });
+
+      // Set business unit context based on staff's assigned businessUnitId
+      if (data.staff.businessUnitId) {
+        setBusinessUnit(data.staff.businessUnitId);
+      }
+
       return true;
     } catch (error) {
       console.error("Login error:", error);
       return false;
     }
-  }, []);
+  }, [setBusinessUnit]);
 
-  const logout = useCallback(() => {
-    setSession(null);
-    localStorage.removeItem("staffSession");
-  }, []);
+  const logout = useCallback(async () => {
+    try {
+      // CRITICAL FIX: Add timeout to prevent hanging on broken shift close calls
+      const logoutPromise = fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      // Add 5 second timeout - if server hangs, we still logout locally
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Logout timeout")), 5000);
+      });
+
+      await Promise.race([logoutPromise, timeoutPromise]);
+    } catch (error) {
+      console.warn("Logout request failed (continuing locally):", error);
+      // Continue with local logout even if server request fails
+    } finally {
+      // Always clear local session regardless of server response
+      setSession(null);
+      localStorage.removeItem("staffSession");
+
+      // Clear any ephemeral store/cart state to prevent cross-user data leakage
+      try {
+        setBusinessUnit(null);
+      } catch {
+        // ignore
+      }
+      localStorage.removeItem('businessUnit');
+      localStorage.removeItem('activeBusinessUnitId');
+      localStorage.removeItem('cart');
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('table_cart:')) {
+          localStorage.removeItem(key);
+        }
+      }
+    }
+  }, [setBusinessUnit]);
 
   const canAccess = useCallback(
     (requiredRole: StaffRole | StaffRole[]): boolean => {
@@ -124,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         owner: 3,
         manager: 2,
         cashier: 1,
+        kitchen: 0,
       };
 
       const userLevel = roleHierarchy[currentStaff.role];
@@ -140,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isOwner = currentStaff?.role === "owner";
   const isManager = currentStaff?.role === "manager" || isOwner;
   const isCashier = currentStaff?.role === "cashier";
+  const isKitchen = currentStaff?.role === "kitchen";
 
   return (
     <AuthContext.Provider
@@ -153,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isOwner,
         isManager,
         isCashier,
+        isKitchen,
       }}
     >
       {children}

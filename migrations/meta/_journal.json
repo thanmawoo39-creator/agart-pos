@@ -5,43 +5,29 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1767795852694,
-      "tag": "0000_strong_morgan_stark",
+      "when": 1768144396370,
+      "tag": "0000_optimal_wrecker",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
-      "when": 1767805751010,
-      "tag": "0001_easy_supreme_intelligence",
+      "when": 1768181170950,
+      "tag": "0001_unknown_lionheart",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "6",
-      "when": 1767809415422,
-      "tag": "0002_medical_gwen_stacy",
+      "when": 1768183129546,
+      "tag": "0002_tricky_blackheart",
       "breakpoints": true
     },
     {
       "idx": 3,
-      "version": "6",
-      "when": 1767845913528,
-      "tag": "0003_daffy_sinister_six",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1767861602101,
-      "tag": "0004_dazzling_chat",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1768091174280,
-      "tag": "0005_damp_sentinel",
+      "version": "7",
+      "when": 1768183129547,
+      "tag": "0003_add_mobile_payment_qr_url",
       "breakpoints": true
     }
   ]

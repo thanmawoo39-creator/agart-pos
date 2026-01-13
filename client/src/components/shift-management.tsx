@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar, Clock, DollarSign, TrendingUp, Users, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useBusinessMode } from '@/contexts/BusinessModeContext';
 import type { Shift } from '@shared/schema';
 
 interface ShiftManagementProps {
@@ -23,6 +24,7 @@ const formatCurrency = (amount: number) => {
 
 export function ShiftManagement({ className }: ShiftManagementProps) {
   const { currentStaff, isOwner, isManager } = useAuth();
+  const { businessUnit } = useBusinessMode();
   const queryClient = useQueryClient();
   const [openDialog, setOpenDialog] = useState(false);
   const [openingCash, setOpeningCash] = useState('');
@@ -45,7 +47,7 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
 
   // Open shift mutation
   const openShiftMutation = useMutation({
-    mutationFn: async (data: { staffId: string; staffName: string; openingCash: number }) => {
+    mutationFn: async (data: { staffId: string; staffName: string; openingCash: number; businessUnitId?: string | null }) => {
       const response = await fetch('/api/shifts/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -57,7 +59,8 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
       }
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      queryClient.setQueryData(['/api/shifts/current'], data);
       queryClient.invalidateQueries({ queryKey: ['/api/shifts/current'] });
       setOpenDialog(false);
       setOpeningCash('');
@@ -79,6 +82,7 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
       return response.json();
     },
     onSuccess: (data) => {
+      queryClient.setQueryData(['/api/shifts/current'], null);
       queryClient.invalidateQueries({ queryKey: ['/api/shifts/current'] });
       queryClient.invalidateQueries({ queryKey: ['/api/shifts/history'] });
       setShowCloseModal(false);
@@ -102,6 +106,7 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
       staffId: currentStaff.id,
       staffName: currentStaff.name,
       openingCash: parseFloat(openingCash),
+      businessUnitId: businessUnit,
     });
   };
 

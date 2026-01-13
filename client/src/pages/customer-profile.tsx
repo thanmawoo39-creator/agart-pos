@@ -24,6 +24,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth-context";
+import { useBusinessMode } from "@/contexts/BusinessModeContext";
 import {
   ArrowLeft,
   User,
@@ -41,37 +42,40 @@ import type { Customer, CreditLedger } from "@shared/schema";
 export default function CustomerProfile() {
   const { toast } = useToast();
   const { currentStaff } = useAuth();
+  const { businessUnit } = useBusinessMode();
+  const businessUnitId = businessUnit;
   const [, params] = useRoute("/customers/:id");
   const customerId = params?.id;
   const [paymentAmount, setPaymentAmount] = useState("");
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
 
   const { data: customer, isLoading: customerLoading } = useQuery<Customer>({
-    queryKey: ["/api/customers", customerId],
-    enabled: !!customerId,
+    queryKey: [`/api/customers/${customerId}?businessUnitId=${businessUnitId}`],
+    enabled: !!customerId && !!businessUnitId,
   });
 
   const { data: ledgerEntries, isLoading: ledgerLoading } = useQuery<CreditLedger[]>({
-    queryKey: ["/api/customers", customerId, "ledger"],
-    enabled: !!customerId,
+    queryKey: [`/api/customers/${customerId}/ledger?businessUnitId=${businessUnitId}`],
+    enabled: !!customerId && !!businessUnitId,
   });
 
   const addPaymentMutation = useMutation({
     mutationFn: async (amount: number) => {
-      return apiRequest("POST", `/api/customers/${customerId}/payment`, { 
-        amount, 
-        createdBy: currentStaff?.name || "Unknown" 
+      return apiRequest("POST", `/api/customers/${customerId}/repayment`, {
+        amount,
+        businessUnitId,
+        createdBy: currentStaff?.name || "Unknown"
       });
     },
     onSuccess: () => {
       toast({
-        title: "Payment Added",
-        description: "Payment has been recorded successfully",
+        title: "Repayment Recorded",
+        description: "Repayment has been recorded successfully",
       });
       setPaymentAmount("");
       setIsPaymentDialogOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "ledger"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}?businessUnitId=${businessUnitId}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}/ledger?businessUnitId=${businessUnitId}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/summary"] });
     },
     onError: (error: Error) => {
@@ -155,12 +159,12 @@ export default function CustomerProfile() {
           <DialogTrigger asChild>
             <Button data-testid="button-add-payment">
               <DollarSign className="w-4 h-4 mr-2" />
-              Add Payment
+              Repayment
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
-              <DialogTitle>Record Payment</DialogTitle>
+              <DialogTitle>Record Repayment</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
               <div>
@@ -170,7 +174,7 @@ export default function CustomerProfile() {
               </div>
               <Input
                 type="number"
-                placeholder="Payment amount"
+                placeholder="Repayment amount"
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
                 data-testid="input-payment-amount"
@@ -186,7 +190,7 @@ export default function CustomerProfile() {
                 disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || addPaymentMutation.isPending}
                 data-testid="button-submit-payment"
               >
-                {addPaymentMutation.isPending ? "Processing..." : "Record Payment"}
+                {addPaymentMutation.isPending ? "Processing..." : "Record Repayment"}
               </Button>
             </div>
           </DialogContent>
@@ -216,7 +220,7 @@ export default function CustomerProfile() {
                   )}
                   {customer.barcode && (
                     <p className="text-xs flex items-center gap-1">
-                      <Barcode className="w-3 h-3" /> 
+                      <Barcode className="w-3 h-3" />
                       <Badge variant="secondary" className="font-mono text-[10px]">{customer.barcode}</Badge>
                     </p>
                   )}
@@ -298,12 +302,13 @@ export default function CustomerProfile() {
                     <TableHead>Type</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="pr-4 text-right">Balance After</TableHead>
+                    <TableHead className="pr-4 text-right">Running Balance</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {ledgerEntries.map((entry, index) => {
-                    const isCharge = entry.type === "charge";
+                    const kind = (entry as any).transactionType || entry.type;
+                    const isCharge = kind === "sale";
                     return (
                       <TableRow key={entry.id || index} data-testid={`row-ledger-${index}`}>
                         <TableCell className="pl-4 text-xs text-muted-foreground">
@@ -319,11 +324,11 @@ export default function CustomerProfile() {
                             ) : (
                               <ArrowDownRight className="w-3 h-3" />
                             )}
-                            {isCharge ? "Charge" : "Payment"}
+                            {isCharge ? "Sale" : "Repayment"}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {entry.description || (isCharge ? "Credit purchase" : "Payment received")}
+                          {entry.description || (isCharge ? "Credit sale" : "Repayment")}
                         </TableCell>
                         <TableCell className="text-right">
                           <span className={`font-bold tabular-nums ${isCharge ? "text-amber-600" : "text-emerald-600"}`}>

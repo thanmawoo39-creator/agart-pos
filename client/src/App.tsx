@@ -10,6 +10,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { LoginModal } from "@/components/login-modal";
+import { BusinessModeProvider } from "@/contexts/BusinessModeContext";
+import HeaderStoreSwitcher from "@/components/layout/HeaderStoreSwitcher";
 import { Button } from "@/components/ui/button";
 import { User, ShieldAlert } from "lucide-react";
 import NotFound from "@/pages/not-found";
@@ -25,6 +27,7 @@ import Staff from "@/pages/staff";
 import Attendance from "@/pages/attendance";
 import Expenses from "@/pages/expenses";
 import Settings from "@/pages/settings";
+import Kitchen from "@/pages/kitchen";
 import { ImageRecognition } from "@/components/image-recognition";
 import { AIRecognizePage } from "@/pages/ai-recognize";
 
@@ -38,6 +41,7 @@ function Router() {
       <Route path="/customers/:id" component={CustomerProfile} />
       <Route path="/customers" component={Customers} />
       <Route path="/ledger" component={Ledger} />
+      <Route path="/kitchen" component={Kitchen} />
       <Route path="/reports" component={Reports} />
       <Route path="/staff" component={Staff} />
       <Route path="/attendance" component={Attendance} />
@@ -57,6 +61,9 @@ function AppHeader() {
     <>
       <header className="flex items-center justify-between gap-4 px-3 py-2 md:px-4 md:py-3 border-b border-border bg-background sticky top-0 z-50">
         <SidebarTrigger data-testid="button-sidebar-toggle" />
+        <div className="flex-1 flex justify-center">
+          <HeaderStoreSwitcher />
+        </div>
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
@@ -82,14 +89,14 @@ function AppHeader() {
 }
 
 function ProtectedApp() {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, currentStaff } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
 
   // Check if app is running in standalone PWA mode
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
-                        (window.navigator as any).standalone || 
-                        document.referrer.includes('android-app://');
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone ||
+    document.referrer.includes('android-app://');
 
   // Force login modal on startup if not authenticated
   useEffect(() => {
@@ -113,8 +120,24 @@ function ProtectedApp() {
   // Handle successful login
   const handleLoginSuccess = () => {
     setLoginOpen(false);
-    setLocation('/'); // Redirect to dashboard
+    if (currentStaff?.role === 'kitchen') {
+      setLocation('/kitchen');
+    } else if (currentStaff?.role === 'cashier' || (currentStaff as any)?.role === 'waiter') {
+      setLocation('/sales');
+    } else {
+      setLocation('/'); // Redirect to dashboard
+    }
   };
+
+  // Kitchen role guard: force kitchen staff to stay on Kitchen view
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (currentStaff?.role !== 'kitchen') return;
+
+    if (location !== '/kitchen') {
+      setLocation('/kitchen');
+    }
+  }, [isLoggedIn, currentStaff?.role, location, setLocation]);
 
   // Block access to content if not logged in
   if (!isLoggedIn) {
@@ -167,9 +190,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <AuthProvider>
-          <ProtectedApp />
-        </AuthProvider>
+        <BusinessModeProvider>
+          <AuthProvider>
+            <ProtectedApp />
+          </AuthProvider>
+        </BusinessModeProvider>
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

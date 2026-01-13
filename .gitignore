@@ -4,3 +4,16 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+nul
+backups/
+phase20-backups/
+.phase20-backups/
+database.sqlite
+database*.sqlite
+*.db
+sqlite.db
+server/database.sqlite
+public/uploads/
+uploads/
+tmpclaude-*
+dev.log

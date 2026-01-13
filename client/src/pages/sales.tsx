@@ -1,346 +1,279 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useReactToPrint } from 'react-to-print';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { useToast } from '@/hooks/use-toast';
-import {
-  ShoppingCart,
-  Camera,
-  Smartphone,
-  X,
-  Upload,
-  Printer
-} from 'lucide-react';
-import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
-import { SalesGrid } from '@/components/SalesGrid';
-import { CartSection } from '@/components/CartSection';
-import { SalesHistory } from '@/components/SalesHistory';
-import ReceiptTemplate from '@/components/ReceiptTemplate';
-import MobileScanner from '@/components/MobileScanner';
-import { Product, CartItem, Customer, Sale } from '@/types/sales';
 import { API_BASE_URL } from '@/lib/api-config';
-import { isCustomerCode } from '@/hooks/use-scanner';
+import { useToast } from '@/hooks/use-toast';
+import { useBusinessMode } from '@/contexts/BusinessModeContext';
+import { useAuth } from '@/lib/auth-context';
+import { GroceryGrid } from '@/components/sales/GroceryGrid';
+import { TableGrid } from '@/components/sales/TableGrid';
+import { CartSection } from '@/components/sales/CartSection';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import ReceiptTemplate from '@/components/ReceiptTemplate';
+import { AlertTriangle } from 'lucide-react';
+import type { BusinessUnit, CartItem, CurrentShift, Customer, Product, Sale, SaleItem, Table } from '@shared/schema';
 
-// Helper function to format currency in Myanmar Kyat
-const formatCurrency = (amount: number): string => {
-  return new Intl.NumberFormat('my-MM', {
-    style: 'currency',
-    currency: 'MMK',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+type TableWithOrder = Omit<Table, 'currentOrder'> & {
+  orderCart?: CartItem[];
+  currentOrder?: { items: CartItem[]; total: number } | null;
+  customerId?: string;
+  customer_id?: string;
 };
 
-export default function Sales() {
-  const [activeTab, setActiveTab] = useState('new-sale');
-  const [selectedCustomer, setSelectedCustomer] = useState<string>('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('');
-  const [showMobilePayment, setShowMobilePayment] = useState(false);
-  const [showCameraModal, setShowCameraModal] = useState(false);
-  const [paymentSlipUrl, setPaymentSlipUrl] = useState<string>('');
-  const [capturedImage, setCapturedImage] = useState<string>('');
-  const [lastSaleId, setLastSaleId] = useState<string>('');
-  const [amountReceived, setAmountReceived] = useState<number>(0);
-  const [lastSaleTotal, setLastSaleTotal] = useState<number>(0);
-  const [lastSaleData, setLastSaleData] = useState<{
-    cartItems: CartItem[];
-    total: number;
-    paymentMethod: string;
-    amountReceived: number;
-    timestamp: string;
-  } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const scannerRef = useRef<any>(null);
-  const [scanner, setScanner] = useState<any>(null);
-  const [showScanner, setShowScanner] = useState(false);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const { toast } = useToast();
+interface EnrichedProduct extends Product {
+  businessUnitId?: string | null;
+}
+
+interface OrderTableResponse {
+  table?: TableWithOrder;
+  newItems?: Array<{ quantity: number }>;
+}
+
+function ReceiptModal({
+  open,
+  onOpenChange,
+  sale,
+  paymentMethod,
+  amountReceived,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  sale: Sale | null;
+  paymentMethod: Sale['paymentMethod'] | '';
+  amountReceived: number;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Receipt</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          {sale ? (
+            <ReceiptTemplate
+              cartItems={(sale.items || []).map((i: SaleItem) => ({
+                name: i.productName,
+                quantity: Number(i.quantity) || 0,
+                price: Number(i.unitPrice) || 0,
+                total:
+                  Number(i.total) ||
+                  (Number(i.unitPrice) || 0) * (Number(i.quantity) || 0),
+              }))}
+              total={Number(sale.total) || 0}
+              discount={Number(sale.discount) || 0}
+              paymentMethod={sale.paymentMethod || ''}
+              date={sale.timestamp || new Date().toISOString()}
+              orderId={sale.id || ''}
+              amountGiven={paymentMethod === 'cash' ? amountReceived : undefined}
+              change={
+                paymentMethod === 'cash'
+                  ? Math.max(0, amountReceived - (Number(sale.total) || 0))
+                  : undefined
+              }
+            />
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+            <Button onClick={() => window.print()}>
+              Print
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const Sales = () => {
+  const { businessUnit, setBusinessUnit } = useBusinessMode();
+  const { currentStaff } = useAuth();
   const queryClient = useQueryClient();
-  const componentRef = useRef(null);
-  const [isCustomerScannerOpen, setIsCustomerScannerOpen] = useState(false);
-  const [showPrintPreview, setShowPrintPreview] = useState(false);
-
-  const handleCustomerScanSuccess = (decodedText: string) => {
-    if (isCustomerCode(decodedText)) {
-      const foundCustomer = customers.find(c =>
-        (c.barcode && c.barcode.toUpperCase() === decodedText.toUpperCase()) ||
-        c.id === decodedText
-      );
-
-      if (foundCustomer) {
-        setSelectedCustomer(foundCustomer.id);
-        const creditDisplay = (foundCustomer.currentBalance ?? 0) > 0
-          ? `Debt: ${formatCurrency(foundCustomer.currentBalance ?? 0)}`
-          : 'No Outstanding Debt';
-        toast({
-          title: `👤 Customer Linked: ${foundCustomer.name}`,
-          description: creditDisplay,
-        });
-      } else {
-        toast({
-          title: "Customer Not Found",
-          description: `No customer found with code: ${decodedText}`,
-          variant: "destructive",
-        });
-      }
-    } else {
-        toast({
-            title: "Invalid Customer Card",
-            description: "This does not appear to be a valid customer card.",
-            variant: "destructive",
-        });
-    }
-  };
-
-  // Cart state from local component (can be migrated to useCart hook later)
+  const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const clearCart = () => setCart([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<Sale['paymentMethod'] | ''>('');
+  const [amountReceived, setAmountReceived] = useState<number>(0);
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
+  const [receiptPaymentMethod, setReceiptPaymentMethod] = useState<Sale['paymentMethod'] | ''>('');
+  const [receiptAmountReceived, setReceiptAmountReceived] = useState<number>(0);
+  const { toast } = useToast();
 
-  const handlePrint = useReactToPrint({
-    content: () => componentRef.current,
-  } as any);
-
-  // Fetch products
-  const { data: products = [], isLoading: productsLoading } = useQuery<Product[]>({
-    queryKey: ['products'],
+  // Get business unit ID from context
+  const businessUnits = useQuery<BusinessUnit[]>({
+    queryKey: ['/api/business-units'],
     queryFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/products`);
+      const response = await fetch(`${API_BASE_URL}/api/business-units`, { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch business units');
+      return response.json();
+    }
+  });
+
+  // BusinessModeContext stores the businessUnit as the business unit ID (UUID)
+  const businessUnitId = businessUnit;
+  const currentBusinessUnit = businessUnits.data?.find(u => u.id === businessUnitId) || null;
+  const businessUnitName = currentBusinessUnit?.name || businessUnit || '';
+
+  // Strict type checking for restaurant mode
+  const isRestaurantMode =
+    (currentBusinessUnit?.type?.toLowerCase() === 'restaurant') ||
+    (currentBusinessUnit?.name?.toLowerCase() === 'restaurant');
+
+  const tableCartKey = (tableId: string) => `table_cart:${businessUnitId || 'none'}:${tableId}`;
+
+  const { data: currentShift } = useQuery<CurrentShift | null>({
+    queryKey: ['/api/shifts/current'],
+  });
+
+  const isShiftMismatch =
+    !!(currentShift?.isActive && currentShift?.businessUnitId && businessUnitId && currentShift.businessUnitId !== businessUnitId);
+
+  const [shiftMismatchOpen, setShiftMismatchOpen] = useState(false);
+  useEffect(() => {
+    if (isShiftMismatch) {
+      setShiftMismatchOpen(true);
+    } else {
+      setShiftMismatchOpen(false);
+    }
+  }, [isShiftMismatch]);
+
+  const previousBusinessUnitIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!businessUnitId) {
+      previousBusinessUnitIdRef.current = businessUnitId;
+      setSelectedTable(null);
+      setTableSearchTerm('');
+      return;
+    }
+
+    if (previousBusinessUnitIdRef.current && previousBusinessUnitIdRef.current !== businessUnitId) {
+      setCart([]);
+      setSelectedCustomer('');
+      setPaymentMethod('');
+      setAmountReceived(0);
+      setShowReceipt(false);
+      setReceiptSale(null);
+      setSelectedTable(null);
+      setTableSearchTerm('');
+    }
+
+    previousBusinessUnitIdRef.current = businessUnitId;
+  }, [businessUnitId]);
+
+  const { data: products = [], isLoading: productsLoading } = useQuery<Product[]>({
+    queryKey: [`/api/products?businessUnitId=${businessUnitId}`],
+    queryFn: async () => {
+      if (!businessUnitId) return [];
+      const response = await fetch(`${API_BASE_URL}/api/products?businessUnitId=${businessUnitId}`, { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch products');
       return response.json();
     }
   });
 
-  // Fetch customers
+  const visibleProducts = businessUnitId
+    ? products.filter((p: EnrichedProduct) => (p?.businessUnitId || null) === businessUnitId)
+    : [];
+
   const { data: customers = [] } = useQuery<Customer[]>({
-    queryKey: ['customers'],
+    queryKey: [`/api/customers?businessUnitId=${businessUnitId}`],
+    enabled: !!businessUnitId,
     queryFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/customers`);
+      if (!businessUnitId) return [];
+      const response = await fetch(`${API_BASE_URL}/api/customers?businessUnitId=${businessUnitId}`, { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch customers');
       return response.json();
-    }
+    },
   });
 
-  // Fetch recent sales
-  const { data: sales = [], isLoading: salesLoading } = useQuery<Sale[]>({
-    queryKey: ['sales'],
-    queryFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/sales`);
-      if (!response.ok) throw new Error('Failed to fetch sales');
-      return response.json();
-    }
-  });
-
-  // Complete sale mutation with graceful degradation
-  const completeSaleMutation = useMutation({
-    mutationFn: async (saleData: {
-      items: Array<{
-        productId: string;
-        productName: string;
-        quantity: number;
-        unitPrice: number;
-        total: number;
-      }>;
-      subtotal: number;
-      discount: number;
-      tax: number;
-      total: number;
-      paymentMethod: string;
-      paymentStatus: string;
-      customerId?: string;
-      paymentSlipUrl?: string;
-      timestamp: string;
-    }) => {
-      const response = await fetch(`${API_BASE_URL}/api/sales/complete`, {
+  const orderTableMutation = useMutation<OrderTableResponse, Error, { tableId: string; tableNumber?: string; cart: CartItem[] }>({
+    mutationFn: async ({ tableId, tableNumber, cart }: { tableId: string; tableNumber?: string; cart: CartItem[] }) => {
+      if (!businessUnitId) throw new Error('Business unit not set');
+      const res = await fetch(`${API_BASE_URL}/api/tables/${tableId}/order?businessUnitId=${businessUnitId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(saleData)
+        credentials: 'include',
+        body: JSON.stringify({
+          tableNumber: tableNumber || null,
+          cart: cart || [],
+        }),
       });
-      if (!response.ok) {
-        const errorData = await response.json().catch((error: any) => ({}));
-        throw new Error(errorData.error || 'Failed to complete sale');
-      }
-      return response.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to order');
+      return data as OrderTableResponse;
     },
     onSuccess: (data) => {
-      // Save last sale data for reprinting (BEFORE clearing cart)
-      setLastSaleData({
-        cartItems: [...cart],
-        total: getTotal(),
-        paymentMethod: paymentMethod,
-        amountReceived: amountReceived,
-        timestamp: new Date().toISOString(),
-      });
-      setLastSaleId(data.id || '');
-
-      // Show print preview dialog instead of printing immediately
-      setShowPrintPreview(true);
-
-      // Clear the cart state
-      clearCart();
-      // Reset the 'Amount Received' input
-      setAmountReceived(0);
-      // Reset payment method and customer
-      setPaymentMethod('');
-      setSelectedCustomer('');
-      setCapturedImage('');
-      setPaymentSlipUrl('');
-
-      // Show success toast
-      toast({ title: "Sale Completed", description: "Review your receipt before printing" });
-    },
-    onError: (error: any) => {
-      console.error('Sale completion error:', error);
-      
-      // Extract error code and message from backend if available
-      const errorCode = error.code;
-      const errorMessage = error.message || 'Failed to complete sale';
-      
-      // Check for specific error types from backend
-      if (errorCode === 'INSUFFICIENT_STOCK') {
-        toast({
-          title: "Stock Issue",
-          description: "Not enough stock for one or more items. Please check inventory levels.",
-          variant: "destructive",
-        });
-      } else if (errorCode === 'PRODUCT_NOT_FOUND') {
-        toast({
-          title: "Product Error",
-          description: "One or more products in cart not found. Please refresh and try again.",
-          variant: "destructive",
-        });
-      } else if (errorCode === 'CUSTOMER_NOT_FOUND') {
-        toast({
-          title: "Customer Error",
-          description: "Selected customer not found. Please choose a different customer.",
-          variant: "destructive",
-        });
-      } else if (errorCode === 'CUSTOMER_REQUIRED') {
-        toast({
-          title: "Customer Required",
-          description: "A customer is required for credit sales. Please select a customer.",
-          variant: "destructive",
-        });
-      } else if (errorCode === 'CREDIT_LIMIT_EXCEEDED') {
-        toast({
-          title: "Credit Limit Exceeded",
-          description: "Customer has exceeded their credit limit. Please use a different payment method.",
-          variant: "destructive",
-        });
-      } else if (errorMessage.includes('stock') || errorMessage.includes('inventory')) {
-        toast({
-          title: "Stock Issue",
-          description: "Not enough stock for one or more items. Please check inventory.",
-          variant: "destructive",
-        });
-      } else if (errorMessage.includes('Invalid sale data')) {
-        toast({
-          title: "Data Error",
-          description: "Invalid sale data. Please try again.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: errorMessage || "Failed to complete sale. Please try again.",
-          variant: "destructive",
-        });
+      const newCount = Array.isArray(data?.newItems)
+        ? data.newItems.reduce((s, i) => s + (Number(i?.quantity) || 0), 0)
+        : 0;
+      toast({ title: 'Order Sent', description: `New items: ${newCount}` });
+      if (data?.table?.id && selectedTable?.id === data.table.id) {
+        setSelectedTable(data.table);
+      } else if (selectedTable?.id) {
+        setSelectedTable((prev) => (prev ? { ...prev, serviceStatus: 'ordered' } : prev));
       }
+      queryClient.invalidateQueries({ queryKey: [`/api/tables?businessUnitId=${businessUnitId}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/kitchen-tickets?businessUnitId=${businessUnitId}`] });
+    },
+    onError: (e) => {
+      toast({
+        title: 'Order Failed',
+        description: e instanceof Error ? e.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const checkBillMutation = useMutation<TableWithOrder, Error, { tableId: string }>({
+    mutationFn: async ({ tableId }: { tableId: string }) => {
+      if (!businessUnitId) throw new Error('Business unit not set');
+      const res = await fetch(`${API_BASE_URL}/api/tables/${tableId}/service-status?businessUnitId=${businessUnitId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ serviceStatus: 'billing' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to check bill');
+      return data as TableWithOrder;
+    },
+    onSuccess: (data) => {
+      toast({ title: 'Billing', description: 'Table is ready to pay.' });
+      if (data?.id && selectedTable?.id === data.id) {
+        setSelectedTable(data);
+      } else if (selectedTable?.id) {
+        setSelectedTable((prev) => (prev ? { ...prev, serviceStatus: 'billing' } : prev));
+      }
+      queryClient.invalidateQueries({ queryKey: [`/api/tables?businessUnitId=${businessUnitId}`] });
+    },
+  });
+
+  const { data: tables = [], isLoading: tablesLoading } = useQuery<TableWithOrder[]>({
+    queryKey: [`/api/tables?businessUnitId=${businessUnitId}`],
+    queryFn: async () => {
+      if (!businessUnitId) return [];
+      const response = await fetch(`${API_BASE_URL}/api/tables?businessUnitId=${businessUnitId}`, { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch tables');
+      return response.json();
     }
   });
 
-  // QR Scanner callback
-  const handleScanSuccess = useCallback((decodedText: string) => {
-    console.log('🔍 Sales: Barcode scanned:', decodedText);
-
-    // PRIORITY 1: Check if this is a Customer Member Card (starts with "C-" or matches customer data)
-    if (isCustomerCode(decodedText)) {
-      const foundCustomer = customers.find(c =>
-        c.memberId?.toUpperCase() === decodedText.toUpperCase() ||
-        c.barcode === decodedText ||
-        c.phone === decodedText ||
-        c.id === decodedText
-      );
-
-      if (foundCustomer) {
-        // Customer card scanned - link to current sale
-        setSelectedCustomer(foundCustomer.id);
-
-        // Format credit/debt display
-        const creditDisplay = (foundCustomer.currentBalance ?? 0) > 0
-          ? `Debt: ${formatCurrency(foundCustomer.currentBalance ?? 0)}`
-          : 'No Outstanding Debt';
-
-        toast({
-          title: `👤 Customer Linked: ${foundCustomer.name}`,
-          description: creditDisplay,
-        });
-
-        console.log('✅ Customer linked:', foundCustomer.name);
-        return; // STOP - Do not search for product
-      } else {
-        toast({
-          title: "Customer Not Found",
-          description: `No customer found with code: ${decodedText}`,
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
-    // PRIORITY 2: Find product by barcode (normal product scan)
-    const product = products.find(p => p.barcode === decodedText);
-    if (product) {
-      if (product.stock > 0) {
-        addToCart(product);
-        toast({
-          title: "Product Added",
-          description: `${product.name} added to cart`,
-        });
-      } else {
-        toast({
-          title: "Out of Stock",
-          description: `${product.name} is out of stock`,
-          variant: "destructive",
-        });
-      }
-    } else {
-      toast({
-        title: "Product Not Found",
-        description: `No product found with barcode: ${decodedText}`,
-        variant: "destructive",
-      });
-    }
-  }, [products, customers, toast, setSelectedCustomer]);
-
-
-  // Cart functions
-  const addToCart = (product: Product) => {
+  const updateQuantity = (id: string, newQuantity: number) => {
     setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.map(item =>
-          item.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        );
-      }
-      return [...prev, { ...product, quantity: 1 }];
+      const quantity = Math.max(0, newQuantity);
+      if (quantity === 0) return prev.filter(item => item.id !== id);
+      return prev.map(item => {
+        if (item.id === id) {
+          return {
+            ...item,
+            quantity,
+            total: quantity * (Number(item.unitPrice) || 0),
+          };
+        }
+        return item;
+      });
     });
-  };
-
-  const updateQuantity = (id: string, quantity: number) => {
-    if (quantity <= 0) {
-      removeFromCart(id);
-      return;
-    }
-    setCart(prev => prev.map(item =>
-      item.id === id ? { ...item, quantity } : item
-    ));
   };
 
   const removeFromCart = (id: string) => {
@@ -348,674 +281,450 @@ export default function Sales() {
   };
 
   const getTotal = () => {
-    return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+    return cart.reduce((sum, item) => sum + ((Number(item.unitPrice) || 0) * item.quantity), 0);
   };
 
-  // Callback for CartSection to call after printing receipt
-  const handleAfterPrint = () => {
-    console.log('🖨️ Print completed, clearing cart...');
-    // Clear cart and reset form
-    setCart([]);
-    setSelectedCustomer('');
-    setPaymentMethod('');
-    setAmountReceived(0);
-    setCapturedImage('');
-    setPaymentSlipUrl('');
-  };
-
-  // Camera functions
-  const startCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
-      });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
+  const addToCart = (product: Product) => {
+    if (isRestaurantMode && !selectedTable) {
+      toast({ title: 'Select a table first', description: 'Tap an available table to start an order.', variant: 'destructive' });
+      return;
+    }
+    setCart(prev => {
+      const existing = prev.find(item => item.productId === product.id);
+      if (existing) {
+        return prev.map(item =>
+          item.productId === product.id
+            ? { ...item, quantity: item.quantity + 1, total: (item.quantity + 1) * (Number(item.unitPrice) || 0) }
+            : item
+        );
       }
-    } catch (error) {
-      console.error('Error accessing camera:', error);
-      toast({
-        title: "Camera Error",
-        description: "Unable to access camera. Please check permissions.",
-        variant: "destructive",
-      });
-    }
-  };
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-  };
-
-  const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const context = canvasRef.current.getContext('2d');
-      if (context) {
-        canvasRef.current.width = videoRef.current.videoWidth;
-        canvasRef.current.height = videoRef.current.videoHeight;
-        context.drawImage(videoRef.current, 0, 0);
-        const imageData = canvasRef.current.toDataURL('image/jpeg');
-        setCapturedImage(imageData);
-        stopCamera();
-      }
-    }
-  };
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const result = e.target?.result as string;
-        setCapturedImage(result);
+      // Use proper type access
+      const unitPrice = Number(product.price) || 0;
+      const newItem: CartItem = {
+        id: crypto.randomUUID(),
+        productId: product.id,
+        productName: product.name,
+        quantity: 1,
+        unitPrice,
+        total: unitPrice,
+        name: product.name,
+        price: unitPrice,
+        product: product,
       };
-      reader.readAsDataURL(file);
-    }
+      return [...prev, newItem];
+    });
   };
 
-  const uploadPaymentSlip = async (imageData: string) => {
-    try {
-      const response = await fetch(imageData);
-      const blob = await response.blob();
-      const formData = new FormData();
-      formData.append('image', blob, 'payment-slip.jpg');
-
-      const uploadResponse = await fetch(`${API_BASE_URL}/api/upload`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!uploadResponse.ok) throw new Error('Upload failed');
-
-      const uploadResult = await uploadResponse.json();
-      setPaymentSlipUrl(uploadResult.url);
-      return uploadResult.url;
-    } catch (error) {
-      console.error('Upload error:', error);
-      throw error;
-    }
-  };
-
-  // Scanner functions
-  const startScanner = () => {
-    setShowScanner(true);
-    
-    setTimeout(() => {
-      const scannerInstance = new Html5QrcodeScanner(
-        "qr-reader",
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
-        },
-        false
-      );
-
-      scannerInstance.render(
-        (decodedText) => {
-          // On successful scan
-          console.log('Scanned barcode:', decodedText);
-          findAndAddProductByBarcode(decodedText);
-          stopScanner();
-        },
-        (errorMessage) => {
-          // On scan failure (ignore continuous errors)
-          console.debug('Scan error:', errorMessage);
-        }
-      );
-
-      scannerRef.current = scannerInstance;
-      setScanner(scannerInstance);
-    }, 100);
-  };
-
-  const stopScanner = () => {
-    if (scannerRef.current) {
-      scannerRef.current.clear().catch((error: any) => {
-        console.error('Failed to clear scanner:', error);
-      });
-      scannerRef.current = null;
-      setScanner(null);
-    }
-    setShowScanner(false);
-  };
-
-  const findAndAddProductByBarcode = (barcode: string) => {
-    // PRIORITY 1: Check if this is a Customer Member Card (starts with "C-")
-    if (isCustomerCode(barcode)) {
-      const foundCustomer = customers.find(c =>
-        c.memberId?.toUpperCase() === barcode.toUpperCase() ||
-        c.barcode === barcode ||
-        c.phone === barcode ||
-        c.id === barcode
-      );
-
-      if (foundCustomer) {
-        // Customer card scanned - link to current sale
-        setSelectedCustomer(foundCustomer.id);
-
-        // Format credit/debt display
-        const creditDisplay = (foundCustomer.currentBalance ?? 0) > 0
-          ? `Debt: ${formatCurrency(foundCustomer.currentBalance ?? 0)}`
-          : 'No Outstanding Debt';
-
-        toast({
-          title: `👤 Customer Linked: ${foundCustomer.name}`,
-          description: creditDisplay,
-        });
-
-        console.log('✅ Customer linked:', foundCustomer.name);
-        return; // STOP - Do not search for product
-      } else {
-        toast({
-          title: "Customer Not Found",
-          description: `No customer found with code: ${barcode}`,
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
-    // PRIORITY 2: Find product by barcode (normal product scan)
-    const product = products.find(p => p.barcode === barcode);
-
+  const handleScanSuccess = useCallback((decodedText: string) => {
+    const product = visibleProducts.find(p => p.barcode === decodedText);
     if (product) {
-      if (product.stock > 0) {
-        addToCart(product);
-        toast({
-          title: "Product Added",
-          description: `${product.name} has been added to cart.`,
-        });
-      } else {
-        toast({
-          title: "Out of Stock",
-          description: `${product.name} is currently out of stock.`,
-          variant: "destructive",
-        });
-      }
+      addToCart(product);
+      toast({ title: "Product Added", description: `${product.name} added to cart` });
     } else {
-      toast({
-        title: "Product Not Found",
-        description: `No product found with barcode: ${barcode}`,
-        variant: "destructive",
-      });
+      toast({ title: "Product Not Found", variant: "destructive" });
     }
+  }, [visibleProducts, toast, addToCart]);
+
+  const mockTables = tables;
+
+  const [selectedTable, setSelectedTable] = useState<TableWithOrder | null>(null);
+  const [tableSearchTerm, setTableSearchTerm] = useState('');
+
+  const updateTableStatusMutation = useMutation<TableWithOrder, Error, { tableId: string; status: 'available' | 'occupied' | 'reserved' }>({
+    mutationFn: async ({ tableId, status }: { tableId: string; status: 'available' | 'occupied' | 'reserved' }) => {
+      if (!businessUnitId) throw new Error('Business unit not set');
+      const res = await fetch(`${API_BASE_URL}/api/tables/${tableId}/status?businessUnitId=${businessUnitId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to update table');
+      return data as TableWithOrder;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/tables?businessUnitId=${businessUnitId}`] });
+    },
+  });
+
+  const updateTableOrderMutation = useMutation<TableWithOrder, Error, { tableId: string; cart: CartItem[] | null }>({
+    mutationFn: async ({ tableId, cart }: { tableId: string; cart: CartItem[] | null }) => {
+      if (!businessUnitId) throw new Error('Business unit not set');
+      const res = await fetch(`${API_BASE_URL}/api/tables/${tableId}/order?businessUnitId=${businessUnitId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ cart }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to update table order');
+      return data as TableWithOrder;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/tables?businessUnitId=${businessUnitId}`] });
+    },
+  });
+
+  const addToTableOrder = (_tableId: string, _item: CartItem) => {
+    // Table ordering is handled by the shared cart once a table is selected
   };
 
-  const completeSale = async () => {
-    if (cart.length === 0) {
-      toast({
-        title: "Cart is empty",
-        description: "Please add items to the cart before completing the sale.",
-        variant: "destructive",
-      });
-      return;
-    }
+  const handleTableSelect = (table: TableWithOrder) => {
+    setSelectedTable(table);
 
-    if (!paymentMethod) {
-      toast({
-        title: "Payment method required",
-        description: "Please select a payment method.",
-        variant: "destructive",
-      });
-      return;
-    }
+    if (!businessUnitId) return;
 
-    // Credit validation: require customer selection
-    if (paymentMethod === 'credit' && !selectedCustomer) {
-      toast({
-        title: "Customer Required",
-        description: "Please select a customer for credit sales.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      let slipUrl = '';
-      
-      // If mobile payment and slip is captured, upload it with graceful degradation
-      if (paymentMethod === 'mobile' && capturedImage) {
+    if (Array.isArray(table?.orderCart)) {
+      setCart(table.orderCart);
+    } else {
+      const key = tableCartKey(table.id);
+      const saved = localStorage.getItem(key);
+      if (saved) {
         try {
-          slipUrl = await uploadPaymentSlip(capturedImage);
-        } catch (uploadError) {
-          console.error('Upload failed, proceeding without slip:', uploadError);
-          // Graceful degradation: continue with sale even if upload fails
-          toast({
-            title: "Upload Warning",
-            description: "Payment slip upload failed, but sale will proceed.",
-            variant: "default",
-          });
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setCart(parsed);
+          } else {
+            setCart([]);
+          }
+        } catch {
+          setCart([]);
         }
+      } else {
+        setCart([]);
       }
+    }
 
-      // If credit payment and slip is captured (I.O.U. or credit note), upload it
-      if (paymentMethod === 'credit' && capturedImage) {
-        try {
-          slipUrl = await uploadPaymentSlip(capturedImage);
-        } catch (uploadError) {
-          console.error('Credit slip upload failed, proceeding without slip:', uploadError);
-          // Graceful degradation: continue with sale even if AI analysis fails
-          toast({
-            title: "Credit Note Warning",
-            description: "Credit note upload failed, but sale will proceed.",
-            variant: "default",
-          });
-        }
-      }
-
-      // Transform cart items to match backend schema
-      const saleItems = cart.map(item => ({
-        productId: item.id,
-        productName: item.name,
-        quantity: item.quantity,
-        unitPrice: item.price,
-        total: item.price * item.quantity
-      }));
-
-      const saleData = {
-        items: saleItems,
-        subtotal: getTotal(), // Add required subtotal field
-        discount: 0, // Add required discount field
-        tax: 0, // Add required tax field
-        total: getTotal(),
-        paymentMethod,
-        paymentStatus: paymentMethod === 'credit' ? 'unpaid' : 'paid', // Add payment status
-        customerId: selectedCustomer || undefined,
-        paymentSlipUrl: slipUrl || undefined,
-        timestamp: new Date().toISOString() // Add required timestamp
-      };
-
-      console.log('🛒 Sending sale data:', saleData);
-
-      // Complete the sale with or without slip
-      await completeSaleMutation.mutateAsync(saleData);
-
-      setShowCameraModal(false);
-      setCapturedImage('');
-      
-    } catch (error) {
-      console.error('Sale completion error:', error);
+    if (table.status === 'available') {
+      setSelectedCustomer('');
+      setPaymentMethod('');
+      setAmountReceived(0);
+      updateTableStatusMutation.mutate({ tableId: table.id, status: 'occupied' });
+      updateTableOrderMutation.mutate({ tableId: table.id, cart: [] });
     }
   };
 
   useEffect(() => {
-    return () => {
-      stopCamera();
-      stopScanner();
-    };
-  }, []);
+    if (!isRestaurantMode) return;
+    if (!selectedTable?.id) return;
+    if (!businessUnitId) return;
+    localStorage.setItem(tableCartKey(selectedTable.id), JSON.stringify(cart));
+
+    const t = setTimeout(() => {
+      updateTableOrderMutation.mutate({ tableId: selectedTable.id, cart });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [cart, selectedTable?.id, businessUnitId, isRestaurantMode]);
+
+  const completeSaleMutation = useMutation<Sale, Error, void>({
+    mutationFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/sales`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          items: cart.map(item => ({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice ?? item.price) || 0,
+            total: (Number(item.unitPrice ?? item.price) || 0) * item.quantity,
+          })),
+          total: getTotal(),
+          paymentMethod,
+          customerId: selectedCustomer || undefined,
+          amountReceived,
+          businessUnitId,
+          storeId: isRestaurantMode ? (selectedTable?.id || undefined) : undefined,
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || 'Failed to complete sale');
+      }
+      return result as Sale;
+    },
+    onSuccess: (result) => {
+      setReceiptSale(result);
+      setReceiptPaymentMethod(paymentMethod);
+      setReceiptAmountReceived(amountReceived);
+      setShowReceipt(true);
+      toast({ title: "Sale Complete", description: `Sale #${result.id} completed successfully` });
+      setCart([]);
+      setSelectedCustomer('');
+      setPaymentMethod('');
+      setAmountReceived(0);
+
+      if (isRestaurantMode && selectedTable?.id) {
+        localStorage.removeItem(tableCartKey(selectedTable.id));
+        updateTableOrderMutation.mutate({ tableId: selectedTable.id, cart: null });
+        updateTableStatusMutation.mutate({ tableId: selectedTable.id, status: 'available' });
+        setSelectedTable(null);
+      }
+    },
+    onError: (error) => {
+      toast({
+        title: "Sale Failed",
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: "destructive",
+      });
+    },
+  });
+
+  const completeSale = () => {
+    if (isRestaurantMode && selectedTable?.id && selectedTable?.serviceStatus !== 'billing') {
+      toast({
+        title: 'Not Ready to Pay',
+        description: 'Click Check Bill before completing the sale.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (cart.length === 0) {
+      toast({ title: "Cart Empty", description: "Please add items to cart", variant: "destructive" });
+      return;
+    }
+    if (!businessUnitId) {
+      toast({ title: "Sale Failed", description: "Business unit is not set", variant: "destructive" });
+      return;
+    }
+
+    if (isShiftMismatch) {
+      setShiftMismatchOpen(true);
+      toast({
+        title: "Business unit mismatch",
+        description: "Your open shift belongs to a different store. Switch store or open a new shift for this store.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    completeSaleMutation.mutate();
+  };
 
   return (
     <div className="container mx-auto p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Sales</h1>
-        {lastSaleData && (
-          <Button
-            onClick={handlePrint}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <Printer className="w-4 h-4" />
-            Reprint Last Receipt
-          </Button>
-        )}
-      </div>
+      <h1 className="text-3xl font-bold">Sales - {businessUnitName}</h1>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="new-sale">New Sale</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="new-sale" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Product Grid */}
-            <div className="lg:col-span-2">
-              <SalesGrid
-                products={products}
-                productsLoading={productsLoading}
-                searchTerm={searchTerm}
-                setSearchTerm={setSearchTerm}
-                onScanSuccess={handleScanSuccess}
-                addToCart={addToCart}
-              />
-            </div>
-
-            {/* Cart */}
+      <Dialog open={shiftMismatchOpen} onOpenChange={setShiftMismatchOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Business unit mismatch</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
             <div>
-              <CartSection
-                cart={cart}
-                customers={customers}
-                selectedCustomer={selectedCustomer}
-                setSelectedCustomer={setSelectedCustomer}
-                paymentMethod={paymentMethod}
-                setPaymentMethod={setPaymentMethod}
-                updateQuantity={updateQuantity}
-                removeFromCart={removeFromCart}
-                getTotal={getTotal}
-                completeSale={completeSale}
-                completeSaleMutation={completeSaleMutation}
-                showMobilePayment={showMobilePayment}
-                setShowMobilePayment={setShowMobilePayment}
-                showCameraModal={showCameraModal}
-                setShowCameraModal={setShowCameraModal}
-                lastSaleId={lastSaleId}
-                lastSaleTotal={lastSaleTotal}
-                paymentSlipUrl={paymentSlipUrl}
-                amountReceived={amountReceived}
-                setAmountReceived={setAmountReceived}
-                onAfterPrint={handleAfterPrint}
-                onScanCustomerClick={() => setIsCustomerScannerOpen(true)}
-              />
+              Active store: <span className="font-mono">{businessUnitId || '-'}</span>
             </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="history">
-          <SalesHistory
-            sales={sales}
-            salesLoading={salesLoading}
-          />
-        </TabsContent>
-      </Tabs>
-
-      <MobileScanner
-        isOpen={isCustomerScannerOpen}
-        onClose={() => setIsCustomerScannerOpen(false)}
-        onScanSuccess={handleCustomerScanSuccess}
-      />
-
-      {/* Mobile Payment QR Code Dialog */}
-      <Dialog open={showMobilePayment} onOpenChange={setShowMobilePayment}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Mobile Payment</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="text-center">
-              <div className="w-48 h-48 mx-auto bg-gray-100 rounded-lg flex items-center justify-center">
-                <Smartphone className="w-16 h-16 text-gray-400" />
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Scan the QR code to complete payment
-              </p>
+            <div>
+              Open shift store: <span className="font-mono">{currentShift?.businessUnitId || '-'}</span>
             </div>
-            <Button
-              onClick={() => {
-                setShowMobilePayment(false);
-                setShowCameraModal(true);
-              }}
-              className="w-full"
-            >
-              <Camera className="w-4 h-4 mr-2" />
-              Capture Payment Slip
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Camera Modal */}
-      <Dialog open={showCameraModal} onOpenChange={setShowCameraModal}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {paymentMethod === 'credit' ? 'Capture Credit Note (I.O.U.)' : 'Capture Payment Slip'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            {!capturedImage ? (
-              <div className="space-y-4">
-                <div className="relative">
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full rounded-lg"
-                  />
-                  <canvas ref={canvasRef} className="hidden" />
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={startCamera} className="flex-1">
-                    <Camera className="w-4 h-4 mr-2" />
-                    Start Camera
-                  </Button>
-                  <Button onClick={capturePhoto} className="flex-1">
-                    <Camera className="w-4 h-4 mr-2" />
-                    Capture
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex-1"
-                  >
-                    <Upload className="w-4 h-4 mr-2" />
-                    Upload
-                  </Button>
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <img
-                  src={capturedImage}
-                  alt="Captured payment slip"
-                  className="w-full rounded-lg"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setCapturedImage('');
-                      startCamera();
-                    }}
-                    className="flex-1"
-                  >
-                    Retake
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      setShowCameraModal(false);
-                      completeSale();
-                    }}
-                    className="flex-1"
-                  >
-                    Complete Sale
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Print Preview Dialog */}
-      <Dialog open={showPrintPreview} onOpenChange={setShowPrintPreview}>
-        <DialogContent className="max-w-md print:max-w-full">
-          <DialogHeader className="print:hidden">
-            <DialogTitle className="text-black dark:text-white">Receipt Preview</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            {/* Thermal Receipt Preview - 80mm width optimized */}
-            <div id="receipt-content" className="mx-auto w-[300px] print:w-[80mm] bg-white p-4 print:p-0 border print:border-0 rounded print:rounded-none shadow print:shadow-none">
-              {lastSaleData && (
-                <div className="text-black font-mono text-sm print:text-[12px]">
-                  {/* Header - Store Info */}
-                  <div className="text-center border-b-2 border-dashed border-black pb-2 mb-2">
-                    <h1 className="font-bold text-xl print:text-[18px] tracking-wide">AGART POS</h1>
-                    <p className="text-[11px] print:text-[10px] mt-1">No. 123, Main Street, Yangon</p>
-                    <p className="text-[11px] print:text-[10px]">Tel: 09-123-456-789</p>
-                  </div>
-
-                  {/* Receipt Info */}
-                  <div className="text-[11px] print:text-[10px] mb-2 space-y-0.5">
-                    <div className="flex justify-between">
-                      <span>Receipt #:</span>
-                      <span className="font-semibold">{lastSaleId.substring(0, 8).toUpperCase()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Date:</span>
-                      <span>{new Date(lastSaleData.timestamp).toLocaleDateString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Time:</span>
-                      <span>{new Date(lastSaleData.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Payment:</span>
-                      <span className="font-semibold">{lastSaleData.paymentMethod.toUpperCase()}</span>
-                    </div>
-                  </div>
-
-                  {/* Divider */}
-                  <div className="border-t-2 border-dashed border-black my-2"></div>
-
-                  {/* Items Table */}
-                  <div className="mb-2">
-                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-1 text-[11px] print:text-[10px] font-bold mb-1">
-                      <div>Item</div>
-                      <div className="text-center w-8">Qty</div>
-                      <div className="text-right w-16">Price</div>
-                      <div className="text-right w-20">Amount</div>
-                    </div>
-                    <div className="border-t border-black pt-1">
-                      {lastSaleData.cartItems.map((item, index) => (
-                        <div key={index} className="grid grid-cols-[1fr_auto_auto_auto] gap-1 text-[11px] print:text-[10px] py-0.5">
-                          <div className="truncate">{item.name}</div>
-                          <div className="text-center w-8">{item.quantity}</div>
-                          <div className="text-right w-16">{formatCurrency(item.price)}</div>
-                          <div className="text-right w-20 font-semibold">{formatCurrency(item.price * item.quantity)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Divider */}
-                  <div className="border-t-2 border-dashed border-black my-2"></div>
-
-                  {/* Totals Section */}
-                  <div className="space-y-1 text-[12px] print:text-[11px]">
-                    <div className="flex justify-between">
-                      <span>Subtotal:</span>
-                      <span className="font-mono">{formatCurrency(lastSaleData.total)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Tax (0%):</span>
-                      <span className="font-mono">{formatCurrency(0)}</span>
-                    </div>
-                    <div className="border-t-2 border-black pt-1 mt-1"></div>
-                    <div className="flex justify-between font-bold text-[14px] print:text-[13px]">
-                      <span>GRAND TOTAL:</span>
-                      <span className="font-mono">{formatCurrency(lastSaleData.total)}</span>
-                    </div>
-                    {lastSaleData.amountReceived > 0 && (
-                      <>
-                        <div className="flex justify-between text-[11px] print:text-[10px] mt-2">
-                          <span>Amount Received:</span>
-                          <span className="font-mono">{formatCurrency(lastSaleData.amountReceived)}</span>
-                        </div>
-                        <div className="flex justify-between font-semibold">
-                          <span>Change:</span>
-                          <span className="font-mono">{formatCurrency(lastSaleData.amountReceived - lastSaleData.total)}</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Divider */}
-                  <div className="border-t-2 border-dashed border-black my-2"></div>
-
-                  {/* Footer */}
-                  <div className="text-center text-[11px] print:text-[10px] space-y-1">
-                    <p className="font-bold">Thank You!</p>
-                    <p className="myanmar-text">ကျေးဇူးတင်ပါသည်၊</p>
-                    <p className="myanmar-text">နောက်လည်း ကြွခဲ့ပါဦး။</p>
-                    <div className="mt-2 pt-2 border-t border-dashed border-gray-400">
-                      <p className="text-[10px] print:text-[9px]">Facebook: fb.com/agartpos</p>
-                      <p className="text-[10px] print:text-[9px] text-gray-600 mt-1">Powered by AGART POS System</p>
-                    </div>
-                  </div>
-                </div>
-              )}
+            <div className="text-muted-foreground">
+              To continue, switch back to the store that owns the open shift, or close that shift and open a new shift for the current store.
             </div>
-
-            {/* Action Buttons - Hidden on Print */}
-            <div className="flex gap-2 print:hidden">
-              <Button
-                variant="outline"
-                onClick={() => setShowPrintPreview(false)}
-                className="flex-1"
-              >
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShiftMismatchOpen(false)}>
                 Close
               </Button>
               <Button
-                onClick={() => {
-                  handlePrint();
-                  setShowPrintPreview(false);
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    const shiftId = currentShift?.shiftId || currentShift?.attendanceId;
+                    if (!shiftId) return;
+                    const res = await fetch(`${API_BASE_URL}/api/shifts/close`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ shiftId }),
+                    });
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => ({}));
+                      throw new Error(err?.error || 'Failed to close shift');
+                    }
+                    queryClient.invalidateQueries({ queryKey: ['/api/shifts/current'] });
+                    setShiftMismatchOpen(false);
+                    toast({ title: 'Shift Closed', description: 'Now open a new shift for the current store.' });
+                  } catch (e) {
+                    toast({
+                      title: 'Close shift failed',
+                      description: e instanceof Error ? e.message : 'Unknown error',
+                      variant: 'destructive',
+                    });
+                  }
                 }}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
               >
-                <Printer className="w-4 h-4 mr-2" />
-                Print Now
+                Close shift
+              </Button>
+              <Button
+                onClick={() => {
+                  if (currentShift?.businessUnitId) {
+                    setBusinessUnit(currentShift.businessUnitId);
+                  }
+                }}
+              >
+                Switch to shift store
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          #receipt-content,
-          #receipt-content * {
-            visibility: visible;
-          }
-          #receipt-content {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 80mm;
-            margin: 0;
-            padding: 0;
-          }
-          .myanmar-text {
-            font-family: 'Myanmar Text', 'Padauk', sans-serif;
-          }
-        }
-      `}</style>
+      <ReceiptModal
+        open={showReceipt}
+        onOpenChange={setShowReceipt}
+        sale={receiptSale}
+        paymentMethod={receiptPaymentMethod}
+        amountReceived={receiptAmountReceived}
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          {isRestaurantMode ? (
+            <div className="space-y-6">
+              <TableGrid
+                tables={mockTables}
+                onTableSelect={handleTableSelect}
+                selectedTable={selectedTable}
+                addToTableOrder={addToTableOrder}
+                showSearch={false}
+              />
+              {selectedTable ? (
+                <GroceryGrid
+                  products={visibleProducts}
+                  productsLoading={productsLoading}
+                  searchTerm={searchTerm}
+                  setSearchTerm={setSearchTerm}
+                  onScanSuccess={handleScanSuccess}
+                  addToCart={addToCart}
+                />
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  Select an available table to start an order and load the menu.
+                </div>
+              )}
+            </div>
+          ) : (
+            <GroceryGrid
+              products={visibleProducts}
+              productsLoading={productsLoading}
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              onScanSuccess={handleScanSuccess}
+              addToCart={addToCart}
+            />
+          )}
+        </div>
+        <div>
+          {isShiftMismatch ? (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 text-amber-700">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold">Shift mismatch</div>
+                  <div className="text-sm mt-1">
+                    Your open shift belongs to a different store. Switch back to your shift store to continue.
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  className="border-amber-300 bg-white"
+                  disabled={!currentStaff?.businessUnitId}
+                  onClick={() => {
+                    if (currentStaff?.businessUnitId) {
+                      setBusinessUnit(currentStaff.businessUnitId);
+                    }
+                  }}
+                >
+                  Switch back to Shift Store
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <CartSection
+            cart={cart}
+            customers={customers}
+            selectedCustomer={selectedCustomer}
+            setSelectedCustomer={setSelectedCustomer}
+            paymentMethod={paymentMethod}
+            setPaymentMethod={setPaymentMethod}
+            updateQuantity={updateQuantity}
+            removeFromCart={removeFromCart}
+            getTotal={getTotal}
+            completeSale={completeSale}
+            completeSaleMutation={completeSaleMutation}
+            showMobilePayment={false}
+            setShowMobilePayment={() => { }}
+            showCameraModal={false}
+            setShowCameraModal={() => { }}
+            amountReceived={amountReceived}
+            setAmountReceived={setAmountReceived}
+            isRestaurantMode={isRestaurantMode}
+            selectedTable={selectedTable}
+            onOrder={() => {
+              if (!selectedTable?.id) return;
 
-      <div style={{ display: "none" }}>
-        {/* Render receipt with lastSaleData if available, otherwise use current cart */}
-        {(lastSaleData || cart.length > 0) && (
-          <ReceiptTemplate
-            ref={componentRef}
-            cartItems={(lastSaleData?.cartItems || cart).map(item => ({
-              name: item.name,
-              quantity: item.quantity,
-              price: item.price,
-              total: item.price * item.quantity
-            }))}
-            total={lastSaleData?.total || getTotal()}
-            discount={0}
-            paymentMethod={lastSaleData?.paymentMethod || paymentMethod}
-            date={lastSaleData?.timestamp || new Date().toISOString()}
-            orderId={lastSaleId || ''}
-            amountGiven={lastSaleData?.amountReceived || amountReceived}
-            change={(lastSaleData?.amountReceived || amountReceived) - (lastSaleData?.total || getTotal())}
+              const currentCart = cart;
+              const alreadySent = Array.isArray(selectedTable?.orderCart) ? selectedTable.orderCart : [];
+
+              if (currentCart.length === 0) {
+                toast({ title: 'Cart Empty', description: 'Add items before ordering.', variant: 'destructive' });
+                return;
+              }
+
+              const keyOf = (it: CartItem) => String(it.productId || it.id || it.name || '');
+              const toQtyMap = (arr: CartItem[]) => {
+                const m = new Map<string, number>();
+                for (const it of arr) {
+                  const k = keyOf(it);
+                  const q = Number(it.quantity) || 0;
+                  if (!k) continue;
+                  m.set(k, (m.get(k) || 0) + q);
+                }
+                return m;
+              };
+
+              const cartMap = toQtyMap(currentCart);
+              const sentMap = toQtyMap(alreadySent);
+              const isIdentical = cartMap.size === sentMap.size && Array.from(cartMap.entries()).every(([k, q]) => (sentMap.get(k) || 0) === q);
+
+              if (isIdentical) {
+                toast({ title: 'No new items to order', description: 'Add new items or increase quantity before ordering.', variant: 'destructive' });
+                return;
+              }
+
+              orderTableMutation.mutate({
+                tableId: selectedTable.id,
+                tableNumber: selectedTable.number,
+                cart: currentCart,
+              });
+            }}
+            orderPending={orderTableMutation.isPending}
+            onCheckBill={() => {
+              if (!selectedTable?.id) return;
+              if (!selectedTable?.currentOrder) {
+                toast({ title: 'No order yet', description: 'Send an order before checking the bill.', variant: 'destructive' });
+                return;
+              }
+
+              const tableCustomerId = selectedTable.customerId || selectedTable.customer_id;
+              if (typeof tableCustomerId === 'string' && tableCustomerId.trim().length > 0) {
+                setSelectedCustomer(tableCustomerId);
+              }
+
+              checkBillMutation.mutate({ tableId: selectedTable.id });
+            }}
+            checkBillPending={checkBillMutation.isPending}
           />
-        )}
+        </div>
       </div>
     </div>
   );
-}
+};
+
+export default Sales;

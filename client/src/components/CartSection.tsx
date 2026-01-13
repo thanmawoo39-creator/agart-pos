@@ -78,12 +78,15 @@ export function CartSection({
   const slipInputRef = useRef<HTMLInputElement>(null);
 
   const calculateTotal = () => {
-    const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const total = cart.reduce((sum, item) => {
+      const unitPrice = Number((item as any).unitPrice ?? item.price) || 0;
+      return sum + (unitPrice * item.quantity);
+    }, 0);
     return total;
   };
 
   const formatPrice = (price: number) => {
-    return `$${price.toFixed(2)}`;
+    return `$${(Number(price) || 0).toFixed(2)}`;
   };
 
   const handleSlipUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -190,12 +193,14 @@ export function CartSection({
           <div className="space-y-4">
             {/* Cart Items - Scrollable Area */}
             <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2">
-              {cart.map((item) => (
+              {cart.map((item) => {
+                const unitPrice = Number((item as any).unitPrice ?? item.price) || 0;
+                return (
               <div key={item.id} className="flex items-start gap-3 py-2 border-b last:border-0">
                 {/* Product Info - Left Side */}
                 <div className="flex-1 min-w-0">
                   <h4 className="font-medium text-sm truncate leading-tight">{item.name}</h4>
-                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{formatPrice(item.price)} each</p>
+                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{formatPrice(unitPrice)} each</p>
                 </div>
 
                 {/* Quantity Controls - Center */}
@@ -221,7 +226,7 @@ export function CartSection({
 
                 {/* Total Price - Right Side */}
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm font-mono whitespace-nowrap">{formatPrice(item.price * item.quantity)}</span>
+                  <span className="font-bold text-sm font-mono whitespace-nowrap">{formatPrice(unitPrice * item.quantity)}</span>
                   <Button
                     size="icon"
                     variant="ghost"
@@ -232,7 +237,8 @@ export function CartSection({
                   </Button>
                 </div>
               </div>
-              ))}
+              );
+              })}
             </div>
 
             {/* Totals and Payment Section */}

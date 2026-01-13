@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth-context";
-import { 
-  BarChart3, 
-  CreditCard, 
-  ArrowUpDown, 
-  ChevronUp, 
+import { useBusinessMode } from "@/contexts/BusinessModeContext";
+import { useCurrency } from "@/hooks/use-currency";
+import {
+  BarChart3,
+  CreditCard,
+  ArrowUpDown,
+  ChevronUp,
   ChevronDown,
   AlertCircle,
   CheckCircle,
@@ -56,11 +58,14 @@ const getCategoryColor = (category: string): string => {
 
 export default function Reports() {
   const { isOwner } = useAuth();
+  const { businessUnit } = useBusinessMode();
+  const { formatCurrency } = useCurrency();
+  const businessUnitId = businessUnit;
   const now = new Date();
   const [pnlStartDate, setPnlStartDate] = useState(format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd"));
   const [pnlEndDate, setPnlEndDate] = useState(format(now, "yyyy-MM-dd"));
   const [executiveSummary, setExecutiveSummary] = useState<string | null>(null);
-  
+
   const [salesSort, setSalesSort] = useState<{ field: SortField; direction: SortDirection }>({
     field: "timestamp",
     direction: "desc",
@@ -71,7 +76,8 @@ export default function Reports() {
   });
 
   const { data: sales, isLoading: salesLoading } = useQuery<Sale[]>({
-    queryKey: ["/api/sales"],
+    queryKey: [`/api/sales?businessUnitId=${businessUnitId}`],
+    enabled: !!businessUnitId,
   });
 
   const { data: riskAnalysis, isLoading: riskLoading } = useQuery<RiskAnalysis[]>({
@@ -97,15 +103,6 @@ export default function Reports() {
     },
   });
 
-  const formatCurrency = (amount: number) => {
-    const roundedAmount = Math.round(amount);
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(roundedAmount);
-  };
 
   const formatDate = (timestamp: string) => {
     return new Date(timestamp).toLocaleDateString("en-US", {
@@ -478,16 +475,15 @@ export default function Reports() {
                             sale.paymentMethod === "credit"
                               ? "secondary"
                               : sale.paymentMethod === "cash"
-                              ? "outline"
-                              : "default"
+                                ? "outline"
+                                : "default"
                           }
-                          className={`text-[10px] ${
-                            sale.paymentMethod === "cash"
+                          className={`text-[10px] ${sale.paymentMethod === "cash"
                               ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
                               : sale.paymentMethod === "credit"
-                              ? "bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30"
-                              : ""
-                          }`}
+                                ? "bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                                : ""
+                            }`}
                         >
                           {sale.paymentMethod}
                         </Badge>
@@ -591,9 +587,8 @@ export default function Reports() {
                   {sortedRiskAnalysis.map((customer, index) => (
                     <tr
                       key={customer.customerId}
-                      className={`border-b border-border ${index % 2 === 0 ? "bg-muted/20" : ""} ${
-                        customer.riskLevel === "high" ? "bg-red-500/5" : ""
-                      }`}
+                      className={`border-b border-border ${index % 2 === 0 ? "bg-muted/20" : ""} ${customer.riskLevel === "high" ? "bg-red-500/5" : ""
+                        }`}
                       data-testid={`row-customer-${customer.customerId}`}
                     >
                       <td className="px-3 md:px-4 py-3">
@@ -607,9 +602,8 @@ export default function Reports() {
                         </div>
                       </td>
                       <td className="px-3 md:px-4 py-3 text-right">
-                        <span className={`text-sm font-bold tabular-nums ${
-                          customer.currentBalance > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
-                        }`}>
+                        <span className={`text-sm font-bold tabular-nums ${customer.currentBalance > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+                          }`}>
                           {formatCurrency(customer.currentBalance)}
                         </span>
                       </td>
@@ -620,13 +614,12 @@ export default function Reports() {
                         <div className="flex items-center justify-end gap-2">
                           <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                             <div
-                              className={`h-full rounded-full transition-all ${
-                                customer.creditUtilization >= 90
+                              className={`h-full rounded-full transition-all ${customer.creditUtilization >= 90
                                   ? "bg-red-500"
                                   : customer.creditUtilization >= 70
-                                  ? "bg-amber-500"
-                                  : "bg-emerald-500"
-                              }`}
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500"
+                                }`}
                               style={{ width: `${Math.min(customer.creditUtilization, 100)}%` }}
                             />
                           </div>
@@ -638,11 +631,10 @@ export default function Reports() {
                       <td className="px-3 md:px-4 py-3 text-center">
                         <Badge
                           variant={customer.riskLevel === "high" ? "destructive" : "secondary"}
-                          className={`text-[10px] ${
-                            customer.riskLevel === "low"
+                          className={`text-[10px] ${customer.riskLevel === "low"
                               ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
                               : ""
-                          }`}
+                            }`}
                         >
                           {customer.riskLevel === "high" ? (
                             <>

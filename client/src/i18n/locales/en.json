@@ -6,6 +6,7 @@
   "navigation": {
     "dashboard": "Dashboard",
     "sales": "Sales (POS)",
+    "kitchen": "Kitchen View",
     "inventory": "Inventory",
     "customers": "Customers",
     "ledger": "Ledger",

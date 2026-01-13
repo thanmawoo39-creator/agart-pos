@@ -42,9 +42,10 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
-import { Package, AlertTriangle, Plus, Minus, Search, History, Barcode, Shuffle, Lock, Image, Pencil, Trash, Loader2, Sparkles } from "lucide-react";
-import type { Product, InventoryLog } from "@shared/schema";
+import { Package, AlertTriangle, Plus, Minus, Search, History, Barcode, Shuffle, Lock, Image, Pencil, Trash, Loader2, Sparkles, ScanLine } from "lucide-react";
+import type { Product, InventoryLog, BusinessUnit } from "@shared/schema";
 import { API_BASE_URL } from "@/lib/api-config";
+import MobileScanner from "@/components/MobileScanner";
 
 type NewProductForm = {
   name: string;
@@ -73,6 +74,7 @@ export default function Inventory() {
   const [searchTerm, setSearchTerm] = useState("");
   const [barcodeSearch, setBarcodeSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [selectedBusinessUnitId, setSelectedBusinessUnitId] = useState<string | null>(null);
   const [adjustModalOpen, setAdjustModalOpen] = useState(false);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [addProductModalOpen, setAddProductModalOpen] = useState(false);
@@ -81,7 +83,7 @@ export default function Inventory() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
-  
+
   const [newProduct, setNewProduct] = useState<NewProductForm>({
     name: "",
     barcode: "",
@@ -99,6 +101,7 @@ export default function Inventory() {
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
   const [isEditingProduct, setIsEditingProduct] = useState(false);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
+  const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
@@ -149,8 +152,35 @@ export default function Inventory() {
   const isLoggedIn = !!session;
   const canManageStock = canAccess("manager");
 
+  const { data: businessUnits = [] } = useQuery<BusinessUnit[]>({
+    queryKey: ['/api/business-units'],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/business-units`, { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch business units');
+      return response.json();
+    }
+  });
+
+  useEffect(() => {
+    if (selectedBusinessUnitId) return;
+    if (!businessUnits || businessUnits.length === 0) return;
+
+    const sessionBu = (session as any)?.staff?.businessUnitId as string | undefined;
+    const initial = sessionBu || businessUnits[0].id;
+    setSelectedBusinessUnitId(initial);
+  }, [businessUnits, selectedBusinessUnitId, session]);
+
   const { data: products = [], isLoading } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
+    queryKey: ['products', selectedBusinessUnitId],
+    queryFn: async () => {
+      const url = selectedBusinessUnitId
+        ? `${API_BASE_URL}/api/products?businessUnitId=${selectedBusinessUnitId}`
+        : `${API_BASE_URL}/api/products`;
+      const response = await fetch(url, { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch products');
+      return response.json();
+    },
+    enabled: isLoggedIn && !!selectedBusinessUnitId,
   });
 
   const { data: productLogs = [], isLoading: logsLoading } = useQuery<InventoryLog[]>({
@@ -162,25 +192,25 @@ export default function Inventory() {
     setProductToDelete(id);
     setDeleteConfirmOpen(true);
   };
-  
+
   const openEditModal = (product: Product) => {
     setIsEditing(true);
     setSelectedProduct(product);
     setNewProduct({
-        name: product.name,
-        barcode: product.barcode || "",
-        price: String(product.price),
-        cost: String(product.cost || ""),
-        stock: String(product.stock),
-        minStockLevel: String(product.minStockLevel),
-        category: product.category || "",
-        unit: product.unit || "pcs",
-        imageData: product.imageData ?? undefined,
-        imageUrl: product.imageUrl ?? undefined,
+      name: product.name,
+      barcode: product.barcode || "",
+      price: String(product.price),
+      cost: String(product.cost || ""),
+      stock: String(product.stock),
+      minStockLevel: String(product.minStockLevel),
+      category: product.category || "",
+      unit: product.unit || "pcs",
+      imageData: product.imageData ?? undefined,
+      imageUrl: product.imageUrl ?? undefined,
     });
     setAddProductModalOpen(true);
   };
-  
+
   // Camera lifecycle managed via useEffect when camera modal opens
   useEffect(() => {
     let mounted = true;
@@ -255,7 +285,7 @@ export default function Inventory() {
     };
   }, [cameraModalOpen]);
 
-  
+
   const adjustMutation = useMutation({
     mutationFn: (data: { productId: string; quantityChange: number; type: string; reason: string; staffName?: string }) =>
       apiRequest("POST", `/api/inventory/adjust/${data.productId}`, {
@@ -265,7 +295,7 @@ export default function Inventory() {
         staffName: data.staffName,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
       if (selectedProduct) {
         queryClient.invalidateQueries({ queryKey: [`/api/inventory/logs/${selectedProduct.id}`] });
       }
@@ -284,7 +314,7 @@ export default function Inventory() {
   const createProductMutation = useMutation({
     mutationFn: (data: Omit<Product, "id" | "status"> & { status?: string }) => apiRequest("POST", "/api/products", data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
       toast({ title: "Product added successfully" });
       closeAddProductModal();
     },
@@ -300,7 +330,7 @@ export default function Inventory() {
   const updateProductMutation = useMutation({
     mutationFn: (payload: { id: string; data: Partial<Product> }) => apiRequest("PATCH", `/api/products/${payload.id}`, payload.data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
       toast({ title: "Product updated" });
       setIsEditingProduct(false);
       closeAddProductModal();
@@ -313,7 +343,7 @@ export default function Inventory() {
   const deleteProductMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/products/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
       toast({ title: "Product deleted" });
     },
     onError: (err: any) => {
@@ -419,6 +449,7 @@ export default function Inventory() {
       minStockLevel: minStock,
       category: newProduct.category.trim() || null,
       unit: newProduct.unit || "pcs",
+      businessUnitId: selectedBusinessUnitId,
     };
 
     if (isEditing && selectedProduct) {
@@ -518,11 +549,12 @@ export default function Inventory() {
   const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))) as string[];
 
   const filteredProducts = products.filter((product) => {
+    const matchesBusinessUnit = !selectedBusinessUnitId || product.businessUnitId === selectedBusinessUnitId;
     const matchesSearch =
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.barcode?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = categoryFilter === "all" || product.category === categoryFilter;
-    return matchesSearch && matchesCategory;
+    return matchesBusinessUnit && matchesSearch && matchesCategory;
   });
 
   const lowStockCount = products.filter((p) => p.stock <= p.minStockLevel).length;
@@ -601,6 +633,18 @@ export default function Inventory() {
             data-testid="input-search"
           />
         </div>
+        <Select value={selectedBusinessUnitId || ''} onValueChange={(v) => setSelectedBusinessUnitId(v)}>
+          <SelectTrigger className="w-[220px]" data-testid="select-business-unit">
+            <SelectValue placeholder="Select Store" />
+          </SelectTrigger>
+          <SelectContent>
+            {businessUnits.map((unit) => (
+              <SelectItem key={unit.id} value={unit.id}>
+                {unit.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="w-[180px]" data-testid="select-category">
             <SelectValue placeholder="All Categories" />
@@ -788,11 +832,9 @@ export default function Inventory() {
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isEditing ? "Edit Product" : "Add New Product"}</DialogTitle>
-            <DialogDescription>
-              {isEditing ? "Update the product details." : "Enter product details to add to inventory."}
-            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label htmlFor="product-name">
                 Product Name <span className="text-destructive">*</span>
@@ -805,6 +847,7 @@ export default function Inventory() {
                 data-testid="input-product-name"
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="product-image-url">Image URL</Label>
               <Input
@@ -814,24 +857,25 @@ export default function Inventory() {
                 placeholder="https://example.com/image.png"
               />
             </div>
+
             <div className="space-y-2">
               <Label>Product Photo</Label>
               {(newProduct.imageData || newProduct.imageUrl) && (
                 <div className="mt-2">
                   <img
                     src={(() => {
-                    const imageUrl = newProduct.imageUrl
-                      ? newProduct.imageUrl.startsWith('http')
-                        ? newProduct.imageUrl
-                        : `${API_BASE_URL}/uploads/${newProduct.imageUrl}`
-                      : undefined;
-                    const finalUrl = newProduct.imageData || imageUrl;
-                    if (finalUrl) {
-                      console.log("Full Image URL:", finalUrl);
-                    }
-                    return finalUrl;
-                  })()}
-                    alt="Product preview" 
+                      const imageUrl = newProduct.imageUrl
+                        ? newProduct.imageUrl.startsWith('http')
+                          ? newProduct.imageUrl
+                          : `${API_BASE_URL}/uploads/${newProduct.imageUrl}`
+                        : undefined;
+                      const finalUrl = newProduct.imageData || imageUrl;
+                      if (finalUrl) {
+                        console.log("Full Image URL:", finalUrl);
+                      }
+                      return finalUrl;
+                    })()}
+                    alt="Product preview"
                     className="w-full h-32 object-cover rounded-lg border" style={{ position: 'relative', zIndex: 50 }}
                   />
                 </div>
@@ -842,8 +886,8 @@ export default function Inventory() {
                 <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
                 {newProduct.imageData && (
                   <>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       onClick={() => setNewProduct((p) => ({ ...p, imageData: undefined } as any))}
                     >
                       Remove Photo
@@ -873,6 +917,7 @@ export default function Inventory() {
                 <img src={(newProduct as any).imageData} alt="preview" className="mt-2 max-h-40 object-contain border" />
               )}
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="product-barcode">Barcode</Label>
               <div className="flex gap-2">
@@ -888,6 +933,15 @@ export default function Inventory() {
                   type="button"
                   variant="outline"
                   size="icon"
+                  onClick={() => setBarcodeScannerOpen(true)}
+                  data-testid="button-scan-barcode"
+                >
+                  <ScanLine className="w-4 h-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
                   onClick={handleGenerateBarcode}
                   data-testid="button-generate-barcode"
                 >
@@ -895,6 +949,7 @@ export default function Inventory() {
                 </Button>
               </div>
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="product-price">
@@ -925,6 +980,7 @@ export default function Inventory() {
                 />
               </div>
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="product-stock">Initial Stock</Label>
@@ -951,6 +1007,7 @@ export default function Inventory() {
                 />
               </div>
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="product-unit">Unit</Label>
@@ -985,6 +1042,7 @@ export default function Inventory() {
               </div>
             </div>
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={closeAddProductModal}>
               Cancel
@@ -1001,6 +1059,15 @@ export default function Inventory() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MobileScanner
+        isOpen={barcodeScannerOpen}
+        onClose={() => setBarcodeScannerOpen(false)}
+        onScanSuccess={(decodedText) => {
+          setNewProduct((prev) => ({ ...prev, barcode: decodedText }));
+        }}
+      />
+
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1139,8 +1206,8 @@ export default function Inventory() {
                             log.type === "sale"
                               ? "secondary"
                               : log.type === "stock-in"
-                              ? "default"
-                              : "outline"
+                                ? "default"
+                                : "outline"
                           }
                           className="text-xs"
                         >

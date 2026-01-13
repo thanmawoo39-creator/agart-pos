@@ -47,15 +47,26 @@ export function AIRecognizePage() {
     };
 
     setCart(prev => {
-      const existing = prev.find(item => item.id === fullProduct.id);
+      const existing = prev.find(item => item.productId === fullProduct.id);
       if (existing) {
         return prev.map(item =>
-          item.id === fullProduct.id
+          item.productId === fullProduct.id
             ? { ...item, quantity: item.quantity + 1 }
             : item
         );
       }
-      return [...prev, { ...fullProduct, quantity: 1 }];
+      const newItem: CartItem = {
+        id: crypto.randomUUID(),
+        productId: fullProduct.id,
+        productName: fullProduct.name,
+        quantity: 1,
+        unitPrice: fullProduct.price,
+        total: fullProduct.price,
+        name: fullProduct.name,
+        price: fullProduct.price,
+        product: fullProduct,
+      };
+      return [...prev, newItem];
     });
 
     toast({
