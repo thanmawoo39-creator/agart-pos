@@ -6,6 +6,7 @@ WORKDIR /app
 # Install dependencies
 COPY package*.json ./
 RUN npm install
+# Verified sync
 
 # Copy source code
 COPY . .
