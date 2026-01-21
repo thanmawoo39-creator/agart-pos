@@ -658,27 +658,15 @@ import { eq, sql } from 'drizzle-orm';
     app.use('/qrcodes', express.static(path.join(process.cwd(), 'public', 'qrcodes')));
     app.use(express.static(path.join(process.cwd(), 'public')));
 
-    // Setup static file serving for production
-    // In production, serve pre-built files from dist/public
-    // In development, this block is skipped and Vite dev server should be started separately
-    const isProduction = process.env.NODE_ENV === "production";
-
-    if (isProduction) {
-      console.log("🚀 Production mode: serving static files from dist/public");
-      serveStatic(app);
-    } else {
-      // Development mode: dynamically import vite setup
-      // This import only happens in development, never in production builds
-      try {
-        const viteModule = await import("./vite.js");
-        await viteModule.setupVite(httpServer, app);
-      } catch (err) {
-        console.error("Failed to load Vite dev server. Make sure you're running in development mode.");
-        console.error(err);
-        // Fallback to static serving if vite fails
-        serveStatic(app);
-      }
-    }
+    // Setup static file serving
+    // PRODUCTION: Always serve pre-built files from dist/public
+    // DEVELOPMENT: Run "npm run dev" which uses tsx to run with Vite HMR
+    //
+    // NOTE: We removed the dynamic vite import to prevent "Cannot find package 'vite'"
+    // error in production. For development, use "npm run dev" instead.
+    console.log(`🚀 Mode: ${process.env.NODE_ENV || 'production'}`);
+    console.log("📂 Serving static files from dist/public");
+    serveStatic(app);
 
     const port = parseInt(process.env.PORT || "10000", 10);
     httpServer.listen(

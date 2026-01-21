@@ -4,10 +4,10 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "set NODE_ENV=development && tsx server/index.ts",
+    "dev": "tsx watch server/dev.ts",
     "build": "tsx script/build.ts",
     "build:client": "vite build",
-    "build:server": "esbuild server/index.ts --bundle --platform=node --outfile=dist/index.js --format=esm --packages=external --external:@vite-pwa/* --external:@babel/*",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --outfile=dist/index.js --format=esm --packages=external --external:@vite-pwa/* --external:@babel/* --external:vite --external:./vite --external:./vite.js --define:process.env.NODE_ENV=\\\"production\\\"",
     "build:all": "npm run build:client && npm run build:server",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
