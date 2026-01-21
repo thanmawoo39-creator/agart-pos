@@ -5,6 +5,6 @@ export default defineConfig({
   schema: "./shared/schema.ts",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL || "",
+    url: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/agart_pos",
   },
 });

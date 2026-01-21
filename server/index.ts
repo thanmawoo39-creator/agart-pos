@@ -27,46 +27,8 @@ async function createStartupBackup() {
   console.log('ℹ️ PostgreSQL database - backups managed by Supabase');
 }
 
-function execAsync(command: string): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
-      if (error) return reject(error);
-      resolve({ stdout: stdout ?? '', stderr: stderr ?? '' });
-    });
-  });
-}
-
-async function killPortIfInUse(port: number) {
-  try {
-    const { stdout } = await execAsync(
-      `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique"`
-    );
-
-    const pids = (stdout || "")
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter((s) => /^\d+$/.test(s))
-      .map((s) => Number(s))
-      .filter((n) => Number.isFinite(n) && n > 0);
-
-    if (pids.length === 0) {
-      console.log(`No process found on port ${port}`);
-      return;
-    }
-
-    for (const pid of pids) {
-      console.log(`Killing process ${pid} on port ${port}`);
-      try {
-        await execAsync(`taskkill /F /PID ${pid}`);
-        console.log(`Successfully killed process ${pid}`);
-      } catch (killError: any) {
-        console.log('Failed to kill process:', killError?.message || String(killError));
-      }
-    }
-  } catch (error: any) {
-    console.log('Failed to check/kill port:', error?.message || String(error));
-  }
-}
+// killPortIfInUse logic removed for cross-platform compatibility
+// Render/Docker handles port binding and process management automatically.
 
 // Load environment as early as possible using an explicit path resolution so
 // the .env file is found regardless of process cwd.
@@ -96,10 +58,9 @@ const envPath = path.resolve(__dirnameResolved, '../.env');
 dotenv.config({ path: envPath, override: true });
 
 // Kill any existing process on port 5000 before starting
-const port = 5000;
-console.log(`Checking for processes on port ${port}...`);
-
-const killPortPromise = killPortIfInUse(port);
+// Port checking removed
+// const killPortPromise = killPortIfInUse(port);
+const killPortPromise = Promise.resolve();
 
 if (process.env.GEMINI_API_KEY) {
   console.log('GEMINI_API_KEY Loaded');
@@ -563,7 +524,8 @@ import { eq, sql } from 'drizzle-orm';
       // be able to operate with an older schema for some functionalities.
     }
 
-    await runMigrations();
+    // await runMigrations();
+    console.log("ℹ️ Skipping legacy manual migrations in favor of Drizzle Kit");
 
     // Initialize Socket.IO server
     const io = new SocketIOServer(httpServer, {
