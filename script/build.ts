@@ -87,7 +87,27 @@ async function buildAll() {
     ...Object.keys(pkg.dependencies || {}),
     ...Object.keys(pkg.devDependencies || {}),
   ];
-  const externals = allDeps.filter((dep) => !allowlist.includes(dep));
+
+  // External packages that should NOT be bundled (native modules, large packages, etc.)
+  // These will be loaded from node_modules at runtime
+  const mustBeExternal = [
+    "pg",
+    "pg-native",
+    "better-sqlite3",
+    "sqlite3",
+    "bufferutil",
+    "utf-8-validate",
+    "canvas",
+    "sharp",
+    "bcrypt",
+    "argon2",
+  ];
+
+  // Combine: all deps NOT in allowlist + packages that must always be external
+  const externals = [
+    ...allDeps.filter((dep) => !allowlist.includes(dep)),
+    ...mustBeExternal,
+  ];
 
   await esbuild({
     entryPoints: ["server/index.ts"],
