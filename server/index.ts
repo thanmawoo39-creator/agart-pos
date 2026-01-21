@@ -6,7 +6,6 @@ import dotenv from 'dotenv';
 import { exec } from 'child_process';
 import os from 'os';
 import { ensureNonEmptySqlMigrations, runMigrations } from './lib/run-migrations';
-import { sqlite } from './lib/db';
 
 function getLocalIpAddress() {
   const interfaces = os.networkInterfaces();
@@ -349,17 +348,8 @@ async function ensureRestaurantTables() {
   try {
     const now = new Date().toISOString();
 
-    // Final hardening: ensure current_order exists even if earlier migrations failed
-    try {
-      const info = await db.all(sql`PRAGMA table_info(tables)`);
-      const names = (info as any[]).map((c: any) => c.name);
-      if (!names.includes('current_order')) {
-        await db.run(sql`ALTER TABLE tables ADD COLUMN current_order TEXT`);
-        console.log('✅ Added current_order column to tables table');
-      }
-    } catch {
-      // ignore
-    }
+    // PostgreSQL schema is managed via Drizzle migrations
+    // Column additions are handled automatically
 
     await ensureRestaurantBusinessUnit2();
     const units = await db.select().from(businessUnits);
@@ -563,7 +553,7 @@ app.use((req, res, next) => {
 });
 
 import { db } from './lib/db';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { businessUnits, tables } from '../shared/schema';
 import { eq, sql } from 'drizzle-orm';
 
@@ -619,9 +609,9 @@ import { eq, sql } from 'drizzle-orm';
 
       await ensureRestaurantTables();
 
-      // LEGACY PURGE: Delete Broken Customers
+      // LEGACY PURGE: Delete Broken Customers (PostgreSQL version)
       console.log('☢️ Running Ghost Customer Purge...');
-      sqlite.prepare(`DELETE FROM customers WHERE origin_unit IS NULL OR business_unit_id IS NULL`).run();
+      await db.execute(sql`DELETE FROM customers WHERE origin_unit IS NULL OR business_unit_id IS NULL`);
       console.log('✅ Ghost Customers Purged.');
 
     } catch (err) {
@@ -656,92 +646,9 @@ import { eq, sql } from 'drizzle-orm';
       throw err;
     });
 
-    // Migration: Add paymentStatus and orderSource columns if they don't exist
-    try {
-      // Use sqlite (raw Better-SQLite3) instead of db (Drizzle wrapper) for raw SQL
-      const salesTableInfo: any[] = sqlite.prepare("PRAGMA table_info(sales)").all();
-
-      // Migration: Add special_stock to products if missing
-      const productsTableInfo: any[] = sqlite.prepare("PRAGMA table_info(products)").all();
-      const hasSpecialStock = productsTableInfo.some((col: any) => col.name === 'special_stock');
-      if (!hasSpecialStock) {
-        console.log("Adding special_stock column to products table...");
-        sqlite.prepare(`
-          ALTER TABLE products 
-          ADD COLUMN special_stock INTEGER NOT NULL DEFAULT 0
-        `).run();
-        console.log("✅ special_stock column added successfully");
-      } else {
-        console.log("✅ special_stock column already exists");
-      }
-
-      const hasPaymentStatus = salesTableInfo.some((col: any) => col.name === 'payment_status');
-      const hasOrderSource = salesTableInfo.some((col: any) => col.name === 'order_source');
-
-      if (!hasPaymentStatus) {
-        console.log("Adding payment_status column to sales table...");
-        sqlite.prepare(`
-          ALTER TABLE sales 
-          ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'paid'
-        `).run();
-        console.log("✅ payment_status column added successfully");
-      } else {
-        console.log("✅ payment_status column already exists");
-      }
-
-      if (!hasOrderSource) {
-        console.log("Adding order_source column to sales table...");
-        sqlite.prepare(`
-          ALTER TABLE sales 
-          ADD COLUMN order_source TEXT NOT NULL DEFAULT 'pos'
-        `).run();
-        console.log("✅ order_source column added successfully");
-      } else {
-        console.log("✅ order_source column already exists");
-      }
-
-      // Migration: Add guest ordering support columns
-      const staffTableInfo: any[] = sqlite.prepare("PRAGMA table_info(staff)").all();
-      const hasIsGuest = staffTableInfo.some((col: any) => col.name === 'is_guest');
-
-      if (!hasIsGuest) {
-        console.log("Adding is_guest column to staff table...");
-        sqlite.prepare(`
-          ALTER TABLE staff 
-          ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0
-        `).run();
-        console.log("✅ is_guest column added successfully");
-      } else {
-        console.log("✅ is_guest column already exists");
-      }
-
-      const hasPhoneVerified = salesTableInfo.some((col: any) => col.name === 'phone_verified');
-      const hasGuestId = salesTableInfo.some((col: any) => col.name === 'guest_id');
-
-      if (!hasPhoneVerified) {
-        console.log("Adding phone_verified column to sales table...");
-        sqlite.prepare(`
-          ALTER TABLE sales 
-          ADD COLUMN phone_verified INTEGER DEFAULT 0
-        `).run();
-        console.log("✅ phone_verified column added successfully");
-      } else {
-        console.log("✅ phone_verified column already exists");
-      }
-
-      if (!hasGuestId) {
-        console.log("Adding guest_id column to sales table...");
-        sqlite.prepare(`
-          ALTER TABLE sales 
-          ADD COLUMN guest_id TEXT
-        `).run();
-        console.log("✅ guest_id column added successfully");
-      } else {
-        console.log("✅ guest_id column already exists");
-      }
-    } catch (error) {
-      console.error("Error adding payment status/order source/guest columns:", error);
-    }
+    // Note: Schema migrations are handled by Drizzle migrations for PostgreSQL
+    // All columns are defined in the schema and applied via `npm run db:push` or migrations
+    console.log("✅ PostgreSQL schema managed via Drizzle migrations");
 
     // Serve uploaded files statically using absolute path to project root
     // IMPORTANT: Use process.cwd() to match multer's upload destination

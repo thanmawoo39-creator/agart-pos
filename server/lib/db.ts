@@ -1,9 +1,20 @@
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import pg from 'pg';
 import * as schema from '../../shared/schema';
 
-// Initialize SQLite database (must match drizzle.config.ts)
-export const sqlite = new Database('database.sqlite');
+const { Pool } = pg;
 
-// Initialize Drizzle ORM
-export const db = drizzle(sqlite, { schema });
+// Use DATABASE_URL environment variable for PostgreSQL connection
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+    console.warn("⚠️ DATABASE_URL not set. Database connection may fail.");
+}
+
+export const pool = new Pool({
+    connectionString: connectionString,
+    ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+});
+
+// Initialize Drizzle ORM with PostgreSQL
+export const db = drizzle(pool, { schema });

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, real, boolean, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { relations, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -6,7 +6,7 @@ import { z } from "zod";
 // --- Drizzle Table Definitions ---
 
 // Products
-export const products = sqliteTable("products", {
+export const products = pgTable("products", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   translatedName: text("translated_name"), // Auto-translated Burmese name via Gemini AI
@@ -21,9 +21,9 @@ export const products = sqliteTable("products", {
   unit: text("unit").notNull().default("pcs"),
   category: text("category"),
   status: text("status").notNull().default("active"),
-  isDailySpecial: integer("is_daily_special", { mode: "boolean" }).notNull().default(false),
-  isStandardMenu: integer("is_standard_menu", { mode: "boolean" }).notNull().default(false),
-  isShared: integer("is_shared", { mode: "boolean" }).notNull().default(false),
+  isDailySpecial: boolean("is_daily_special").notNull().default(false),
+  isStandardMenu: boolean("is_standard_menu").notNull().default(false),
+  isShared: boolean("is_shared").notNull().default(false),
   businessUnitId: text("business_unit_id").references(() => businessUnits.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -32,7 +32,7 @@ export const products = sqliteTable("products", {
 });
 
 // Customers
-export const customers = sqliteTable("customers", {
+export const customers = pgTable("customers", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   phone: text("phone"),
@@ -47,7 +47,7 @@ export const customers = sqliteTable("customers", {
   creditDueDate: text("credit_due_date"),
   monthlyClosingDay: integer("monthly_closing_day"),
   loyaltyPoints: integer("loyalty_points").notNull().default(0),
-  riskTag: text("risk_tag", { enum: ["low", "high"] }).notNull().default("low"),
+  riskTag: text("risk_tag").notNull().default("low"),
   businessUnitId: text("business_unit_id").references(() => businessUnits.id),
   // originUnit tracks where the customer was originally created (for segmentation)
   // Restaurant customers (originUnit='2') should be separate from Grocery customers
@@ -57,27 +57,27 @@ export const customers = sqliteTable("customers", {
 });
 
 // Staff
-export const staff = sqliteTable("staff", {
+export const staff = pgTable("staff", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   pin: text("pin").notNull(),
   password: text("password"), // For owner/admin authentication (nullable - cashiers use PIN only)
-  role: text("role", { enum: ["owner", "manager", "cashier", "waiter", "kitchen", "customer"] }).notNull(),
+  role: text("role").notNull(),
   barcode: text("barcode").unique(),
-  status: text("status", { enum: ["active", "suspended", "deleted"] }).notNull().default("active"),
-  isGuest: integer("is_guest", { mode: "boolean" }).notNull().default(false), // Guest user flag
+  status: text("status").notNull().default("active"),
+  isGuest: boolean("is_guest").notNull().default(false), // Guest user flag
   businessUnitId: text("business_unit_id").references(() => businessUnits.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // Business Units (Dynamic Store Management)
-export const businessUnits = sqliteTable("business_units", {
+export const businessUnits = pgTable("business_units", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
-  type: text("type", { enum: ["grocery", "restaurant", "pharmacy", "electronics", "clothing", "Grocery", "Restaurant", "Pharmacy", "Electronics", "Clothing"] }).notNull(),
+  type: text("type").notNull(),
   settings: text("settings"), // JSON string for store-specific settings
-  isActive: text("is_active", { enum: ["true", "false"] }).notNull().default("true"),
+  isActive: text("is_active").notNull().default("true"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
@@ -113,11 +113,11 @@ export type BusinessUnit = z.infer<typeof businessUnitSchema>;
 export type InsertBusinessUnit = Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">;
 
 // Restaurant Tables (for QR Menu Management)
-export const restaurantTables = sqliteTable("restaurant_tables", {
+export const restaurantTables = pgTable("restaurant_tables", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   tableNumber: text("table_number").notNull().unique(),
   tableName: text("table_name"),
-  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  isActive: boolean("is_active").notNull().default(true),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
@@ -126,14 +126,14 @@ export type RestaurantTable = typeof restaurantTables.$inferSelect;
 export type InsertRestaurantTable = typeof restaurantTables.$inferInsert;
 
 // Restaurant Tables (Old schema - for complex table management)
-export const tables = sqliteTable("tables", {
+export const tables = pgTable("tables", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   number: text("number").notNull(),
   capacity: integer("capacity").notNull(),
-  status: text("status", { enum: ["available", "occupied", "reserved"] }).notNull().default("available"),
+  status: text("status").notNull().default("available"),
   currentOrder: text("current_order"),
   lastOrdered: text("last_ordered"),
-  serviceStatus: text("service_status", { enum: ["ordered", "served", "billing"] }),
+  serviceStatus: text("service_status"),
   businessUnitId: text("business_unit_id").notNull().references(() => businessUnits.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -143,13 +143,13 @@ export type Table = typeof tables.$inferSelect;
 
 
 // Kitchen Tickets (KOT / Kitchen View)
-export const kitchenTickets = sqliteTable("kitchen_tickets", {
+export const kitchenTickets = pgTable("kitchen_tickets", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   businessUnitId: text("business_unit_id").notNull().references(() => businessUnits.id),
   tableId: text("table_id").references(() => tables.id),
   tableNumber: text("table_number"),
   items: text("items"), // JSON string
-  status: text("status", { enum: ["in_preparation", "ready", "served", "cancelled"] }).notNull().default("in_preparation"),
+  status: text("status").notNull().default("in_preparation"),
   // Kanban workflow timestamps
   startedAt: text("started_at"), // When chef clicks "Accept & Cook"
   readyAt: text("ready_at"),     // When chef clicks "Mark Ready"
@@ -161,24 +161,20 @@ export const kitchenTickets = sqliteTable("kitchen_tickets", {
 });
 
 // Sales
-export const sales = sqliteTable("sales", {
+export const sales = pgTable("sales", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   subtotal: real("subtotal").notNull(),
   discount: real("discount").notNull().default(0),
   tax: real("tax").notNull(),
   total: real("total").notNull(),
   status: text("status").notNull().default("pending"),
-  paymentMethod: text("payment_method", { enum: ["cash", "card", "credit", "mobile"] }).notNull(),
+  paymentMethod: text("payment_method").notNull(),
   // Payment tracking
-  paymentStatus: text("payment_status", {
-    enum: ['unpaid', 'pending_verification', 'paid']
-  }).default('paid').notNull(),
+  paymentStatus: text("payment_status").default('paid').notNull(),
 
   // Order source tracking
-  orderSource: text("order_source", {
-    enum: ['qr', 'pos', 'delivery']
-  }).default('pos').notNull(),
-  orderType: text("order_type", { enum: ["dine-in", "delivery", "takeout"] }).notNull().default("dine-in"),
+  orderSource: text("order_source").default('pos').notNull(),
+  orderType: text("order_type").notNull().default("dine-in"),
   tableNumber: text("table_number"),
   customerId: text("customer_id").references(() => customers.id),
   customerName: text("customer_name"),
@@ -198,14 +194,14 @@ export const sales = sqliteTable("sales", {
   driverLng: real("driver_lng"),
   locationUpdatedAt: text("location_updated_at"),
   // Guest ordering support
-  phoneVerified: integer("phone_verified", { mode: "boolean" }).default(false),
+  phoneVerified: boolean("phone_verified").default(false),
   guestId: text("guest_id"),
   // Optimistic locking for concurrent access (multi-cashier)
   version: integer("version").notNull().default(1),
 });
 
 // Sale Items (for detailed tracking)
-export const saleItems = sqliteTable("sale_items", {
+export const saleItems = pgTable("sale_items", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   saleId: text("sale_id").notNull().references(() => sales.id),
   productId: text("product_id").notNull().references(() => products.id),
@@ -216,12 +212,12 @@ export const saleItems = sqliteTable("sale_items", {
 });
 
 // Credit Ledger
-export const creditLedger = sqliteTable("credit_ledger", {
+export const creditLedger = pgTable("credit_ledger", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   customerId: text("customer_id").notNull().references(() => customers.id),
   customerName: text("customer_name").notNull(),
-  type: text("type", { enum: ["sale", "repayment"] }).notNull(),
-  transactionType: text("transaction_type", { enum: ["sale", "repayment"] }),
+  type: text("type").notNull(),
+  transactionType: text("transaction_type"),
   amount: real("amount").notNull(),
   balanceAfter: real("balance_after").notNull(),
   description: text("description"),
@@ -233,7 +229,7 @@ export const creditLedger = sqliteTable("credit_ledger", {
 });
 
 // Attendance
-export const attendance = sqliteTable("attendance", {
+export const attendance = pgTable("attendance", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   staffId: text("staff_id").notNull().references(() => staff.id),
   staffName: text("staff_name").notNull(),
@@ -251,11 +247,11 @@ export const attendance = sqliteTable("attendance", {
 });
 
 // Inventory Logs
-export const inventoryLogs = sqliteTable("inventory_logs", {
+export const inventoryLogs = pgTable("inventory_logs", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   productId: text("product_id").notNull().references(() => products.id),
   productName: text("product_name").notNull(),
-  type: text("type", { enum: ["stock-in", "sale", "adjustment"] }).notNull(),
+  type: text("type").notNull(),
   quantityChanged: integer("quantity_changed").notNull(), // Positive for additions, negative for deductions
   previousStock: integer("previous_stock").notNull(),
   currentStock: integer("current_stock").notNull(),
@@ -267,9 +263,9 @@ export const inventoryLogs = sqliteTable("inventory_logs", {
 });
 
 // Expenses
-export const expenses = sqliteTable("expenses", {
+export const expenses = pgTable("expenses", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  category: text("category", { enum: ["Rent", "Electricity", "Fuel", "Internet", "Taxes", "Other"] }).notNull(),
+  category: text("category").notNull(),
   amount: real("amount").notNull(),
   date: text("date").notNull(),
   description: text("description"),
@@ -279,71 +275,71 @@ export const expenses = sqliteTable("expenses", {
 });
 
 // Payment Buffers - Stores SMS payments temporarily for verification
-export const paymentBuffers = sqliteTable("payment_buffers", {
+export const paymentBuffers = pgTable("payment_buffers", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   amount: real("amount").notNull(),
   transactionId: text("transaction_id"),
   senderName: text("sender_name"),
   smsContent: text("sms_content"),
-  verified: integer("verified", { mode: "boolean" }).default(false).notNull(),
+  verified: boolean("verified").default(false).notNull(),
   verifiedAt: text("verified_at"),
   orderId: text("order_id"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // SMS Logs - Stores ALL incoming SMS for audit history
-export const smsLogs = sqliteTable("sms_logs", {
+export const smsLogs = pgTable("sms_logs", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   sender: text("sender"),
   messageContent: text("message_content"),
   extractedAmount: real("extracted_amount"),
-  status: text("status", { enum: ["received", "matched", "unmatched", "failed"] }).default("received").notNull(),
+  status: text("status").default("received").notNull(),
   matchedOrderId: text("matched_order_id"),
   bufferRecordId: text("buffer_record_id"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 // App Settings
-export const appSettings = sqliteTable("app_settings", {
+export const appSettings = pgTable("app_settings", {
   id: integer("id").primaryKey().default(1),
   storeName: text("store_name").notNull().default("My Store"),
   storeAddress: text("store_address"),
   storePhone: text("store_phone"),
   storeLogoUrl: text("store_logo_url"),
   mobilePaymentQrUrl: text("mobile_payment_qr_url"),
-  aiImageRecognitionEnabled: integer("ai_image_recognition_enabled", { mode: "boolean" }).notNull().default(false),
-  enableTax: integer("enable_tax", { mode: "boolean" }).notNull().default(false),
+  aiImageRecognitionEnabled: boolean("ai_image_recognition_enabled").notNull().default(false),
+  enableTax: boolean("enable_tax").notNull().default(false),
   taxPercentage: real("tax_percentage").notNull().default(0),
-  enableLocalAi: integer("enable_local_ai", { mode: "boolean" }).notNull().default(false),
+  enableLocalAi: boolean("enable_local_ai").notNull().default(false),
   localAiUrl: text("local_ai_url"),
   localAiModel: text("local_ai_model"),
   geminiApiKey: text("gemini_api_key"),
   groqApiKey: text("groq_api_key"),
-  enableMobileScanner: integer("enable_mobile_scanner", { mode: "boolean" }).notNull().default(true),
-  enablePhotoCapture: integer("enable_photo_capture", { mode: "boolean" }).notNull().default(true),
+  enableMobileScanner: boolean("enable_mobile_scanner").notNull().default(true),
+  enablePhotoCapture: boolean("enable_photo_capture").notNull().default(true),
   currencyCode: text("currency_code").notNull().default("THB"),
   currencySymbol: text("currency_symbol").notNull().default("฿"),
-  currencyPosition: text("currency_position", { enum: ["before", "after"] }).notNull().default("before"),
+  currencyPosition: text("currency_position").notNull().default("before"),
   riderPin: text("delivery_rider_pin").default("8888"),
   updatedAt: text("updated_at"),
 });
 
 // Alerts
-export const alerts = sqliteTable("alerts", {
+export const alerts = pgTable("alerts", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  type: text("type", { enum: ["shift_discrepancy", "low_stock", "high_debt", "system"] }).notNull(),
+  type: text("type").notNull(),
   title: text("title").notNull(),
   message: text("message").notNull(),
   staffId: text("staff_id").notNull().references(() => staff.id),
   staffName: text("staff_name").notNull(),
   shiftId: text("shift_id"),
   amount: real("amount"),
-  isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+  isRead: boolean("is_read").notNull().default(false),
   createdAt: text("created_at").notNull(),
 });
 
 // Shifts
-export const shifts = sqliteTable("shifts", {
+export const shifts = pgTable("shifts", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   staffId: text("staff_id").notNull().references(() => staff.id),
   staffName: text("staff_name").notNull(),
@@ -352,7 +348,7 @@ export const shifts = sqliteTable("shifts", {
   endTime: text("end_time"),
   openingCash: real("opening_cash").notNull(),
   closingCash: real("closing_cash"),
-  status: text("status", { enum: ["open", "closed"] }).notNull(),
+  status: text("status").notNull(),
   totalSales: real("total_sales").notNull().default(0),
   cashSales: real("cash_sales").notNull().default(0),
   cardSales: real("card_sales").notNull().default(0),
@@ -792,15 +788,15 @@ export type PublicOrder = z.infer<typeof publicOrderSchema>;
 
 // --- Catering Module Schema ---
 
-export const cateringOrders = sqliteTable("catering_orders", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const cateringOrders = pgTable("catering_orders", {
+  id: serial("id").primaryKey(),
   customerName: text("customer_name").notNull(),
   customerPhone: text("customer_phone").notNull(),
   deliveryDate: text("delivery_date").notNull(), // ISO Timestamp
   deliveryAddress: text("delivery_address"),
   totalAmount: integer("total_amount"),
   depositPaid: integer("deposit_paid").default(0),
-  status: text("status", { enum: ['draft', 'confirmed', 'cooking', 'ready', 'out_for_delivery', 'delivered', 'cancelled'] }).default('confirmed'),
+  status: text("status").default('confirmed'),
   createdByUserId: integer("created_by_user_id"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   // Driver GPS tracking
@@ -812,18 +808,18 @@ export const cateringOrders = sqliteTable("catering_orders", {
   paymentSlipUrl: text("payment_slip_url"),
 });
 
-export const cateringItems = sqliteTable("catering_items", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const cateringItems = pgTable("catering_items", {
+  id: serial("id").primaryKey(),
   cateringOrderId: integer("catering_order_id").references(() => cateringOrders.id),
   itemName: text("item_name"),
   quantity: integer("quantity").notNull(),
   unitPrice: integer("unit_price"),
   totalPrice: integer("total_price"),
-  isAddon: integer("is_addon", { mode: "boolean" }).default(false),
+  isAddon: boolean("is_addon").default(false),
 });
 
 // --- Feedback Module ---
-export const feedback = sqliteTable("feedback", {
+export const feedback = pgTable("feedback", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   customerId: text("customer_id").notNull().references(() => customers.id),
   orderId: text("order_id").notNull().references(() => sales.id),
@@ -867,13 +863,13 @@ export const cateringItemsRelations = relations(cateringItems, ({ one }) => ({
   }),
 }));
 
-export const cateringProducts = sqliteTable("catering_products", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const cateringProducts = pgTable("catering_products", {
+  id: serial("id").primaryKey(),
   key: text("key").notNull().unique(), // e.g. "standard_set"
   label: text("label").notNull(),      // e.g. "Standard Set (Rice+Curry)"
   price: integer("price").notNull(),   // e.g. 60
-  isActive: integer("is_active", { mode: "boolean" }).default(true),
-  isShared: integer("is_shared", { mode: "boolean" }).default(false),
+  isActive: boolean("is_active").default(true),
+  isShared: boolean("is_shared").default(false),
 });
 
 export const insertCateringProductSchema = createInsertSchema(cateringProducts);

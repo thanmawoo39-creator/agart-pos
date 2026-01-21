@@ -41,7 +41,9 @@
       "Bash(ls:*)",
       "Bash(timeout 5 tail:*)",
       "Bash(tasklist:*)",
-      "Bash(start /B npm run dev)"
+      "Bash(start /B npm run dev)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
