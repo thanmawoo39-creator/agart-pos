@@ -24,7 +24,7 @@ WORKDIR /app
 
 # Create persistent data directory for SQLite
 RUN mkdir -p /data
-VOLUME /data
+VOLUME ["/data"]
 
 # Copy built assets and dependencies
 COPY --from=builder /app/dist ./dist
