@@ -44,10 +44,10 @@ COPY --from=builder /app/public ./public
 
 # Environment variables
 ENV NODE_ENV=production
-ENV PORT=8000
+ENV PORT=10000
 # DATABASE_URL is not used, we use /data/database.sqlite defined in code
 
-EXPOSE 8000
+EXPOSE 10000
 
 # Start the application
 CMD ["npm", "start"]

@@ -772,7 +772,7 @@ import { eq, sql } from 'drizzle-orm';
       await setupVite(httpServer, app);
     }
 
-    const port = parseInt(process.env.PORT || "8000", 10);
+    const port = parseInt(process.env.PORT || "10000", 10);
     httpServer.listen(
       {
         port: port,
