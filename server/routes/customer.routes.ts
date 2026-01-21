@@ -237,8 +237,8 @@ router.post("/", isAuthenticated, async (req, res) => {
   } catch (error: any) {
     console.error("Create customer error details:", error);
 
-    // Check for unique constraint violation (SQLite specific code)
-    if (error?.code === 'SQLITE_CONSTRAINT_UNIQUE' || error?.message?.includes('UNIQUE constraint')) {
+    // Check for unique constraint violation (PostgreSQL error codes)
+    if (error?.code === '23505' || error?.message?.includes('unique constraint') || error?.message?.includes('UNIQUE constraint')) {
       return res.status(409).json({ error: "A customer with this barcode, email, or ID already exists." });
     }
 

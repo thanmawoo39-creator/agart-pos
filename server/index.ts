@@ -20,22 +20,11 @@ function getLocalIpAddress() {
 }
 
 // Create automatic backup on server start
+// Note: For PostgreSQL (Supabase), backups are handled by the database service
 async function createStartupBackup() {
-  try {
-    const dbPath = path.join(process.cwd(), 'database.sqlite');
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0];
-    const backupFileName = `POS_Startup_Backup_${timestamp}.db`;
-    const backupPath = path.join(process.cwd(), 'backups', backupFileName);
-
-    // Ensure backups directory exists
-    await fs.mkdir(path.join(process.cwd(), 'backups'), { recursive: true });
-
-    // Create backup copy
-    await fs.copyFile(dbPath, backupPath);
-    console.log(`✅ Startup backup created: ${backupFileName}`);
-  } catch (error) {
-    console.error('❌ Failed to create startup backup:', error);
-  }
+  // PostgreSQL backups should be done via Supabase dashboard or pg_dump
+  // File-based backup is not applicable for remote PostgreSQL databases
+  console.log('ℹ️ PostgreSQL database - backups managed by Supabase');
 }
 
 function execAsync(command: string): Promise<{ stdout: string; stderr: string }> {

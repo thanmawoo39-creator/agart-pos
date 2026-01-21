@@ -52,7 +52,7 @@ import {
 } from "../shared/schema";
 
 import crypto from "crypto";
-import { db, sqlite } from "./lib/db";
+import { db } from "./lib/db";
 import { eq, desc, and, or, isNull, gte, lte, sql, sum, count, ne, not, like, inArray } from "drizzle-orm";
 import { hashPin, verifyPin } from './lib/auth';
 
@@ -1684,34 +1684,9 @@ export class POSStorage implements IStorage {
 
   // Initialize with mock data
   async initialize(): Promise<void> {
-    // Ensure restaurant_tables table exists (manual creation to avoid migration issues)
-    try {
-      sqlite.exec(`
-        CREATE TABLE IF NOT EXISTS restaurant_tables (
-          id TEXT PRIMARY KEY NOT NULL,
-          table_number TEXT NOT NULL UNIQUE,
-          table_name TEXT,
-          is_active INTEGER DEFAULT 1,
-          created_at TEXT,
-          updated_at TEXT
-        );
-      `);
-      console.log('[DB] restaurant_tables table ensured');
-    } catch (err) {
-      console.error('[DB] Error creating restaurant_tables table:', err);
-    }
-
-    // Ensure table_number column exists in sales table
-    try {
-      const tableInfo = sqlite.prepare("PRAGMA table_info(sales)").all();
-      const hasTableNumber = (tableInfo as any[]).some((col: any) => col.name === 'table_number');
-      if (!hasTableNumber) {
-        sqlite.exec(`ALTER TABLE sales ADD COLUMN table_number TEXT;`);
-        console.log('[DB] Added table_number column to sales table');
-      }
-    } catch (err) {
-      // Column might already exist, ignore error
-    }
+    // PostgreSQL schema is managed via Drizzle migrations
+    // Tables are created automatically when migrations run
+    console.log('[DB] PostgreSQL schema managed via Drizzle migrations');
 
     // Ensure settings exist
     await this.getAppSettings();

@@ -139,28 +139,13 @@ router.post('/factory-reset', isAuthenticated, requireRole('owner'), async (req,
 });
 
 // GET /api/admin/backup
-// Downloads the SQLite database file
+// PostgreSQL database backup (not supported via file download)
 router.get('/backup', isAuthenticated, requireRole('owner'), async (req, res) => {
-    try {
-        const path = require('path');
-        const fs = require('fs');
-
-        // Assuming DB is in root/sqlite.db or similar. Check db.ts to be sure, but usually it's obvious.
-        // If using Drizzle with better-sqlite3 info not exposed easily, we guess or check environment.
-        // User's previous logs might show DB path. defaults usually 'sqlite.db'.
-        // Let's assume 'sqlite.db' based on common patterns or check `server/lib/db.ts` first?
-        // Risky to guess. But let's try 'sqlite.db'.
-        const dbPath = path.resolve(process.cwd(), 'sqlite.db');
-
-        if (fs.existsSync(dbPath)) {
-            res.download(dbPath, `backup-${new Date().toISOString().split('T')[0]}.sqlite`);
-        } else {
-            res.status(404).json({ error: "Database file not found" });
-        }
-    } catch (error) {
-        console.error('Backup error:', error);
-        res.status(500).json({ error: "Backup failed" });
-    }
+    // PostgreSQL backups should be done via Supabase dashboard or pg_dump
+    res.status(501).json({
+        error: "Database backup not available for PostgreSQL via this endpoint",
+        message: "Please use Supabase dashboard or pg_dump for database backups"
+    });
 });
 
 export default router;

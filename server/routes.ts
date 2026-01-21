@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { type Server } from "http";
 import { z } from "zod";
 import { storage } from "./storage";
-import { db, sqlite } from "./lib/db";
+import { db } from "./lib/db";
 import { eq, sql, desc } from "drizzle-orm";
 import {
   insertExpenseSchema,
@@ -2473,58 +2473,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // Database Backup & Restore Routes
+  // Database Backup & Restore Routes (PostgreSQL - backup not supported via file download)
   app.get("/api/admin/backup", isAuthenticated, requireAdmin, async (req, res) => {
-    try {
-      const dbPath = path.join(process.cwd(), 'sqlite.db');
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0];
-      const backupFileName = `POS_Backup_${timestamp}.db`;
-      const backupPath = path.join(process.cwd(), backupFileName);
-      await fs.copyFile(dbPath, backupPath);
-
-      res.download(backupPath, backupFileName, (err) => {
-        if (err) {
-          console.error("Backup download error:", err);
-          res.status(500).json({ error: "Failed to download backup" });
-        } else {
-          fs.unlink(backupPath).catch(() => { });
-        }
-      });
-    } catch (error) {
-      console.error("Backup error:", error);
-      res.status(500).json({ error: "Failed to create backup" });
-    }
+    // PostgreSQL backups should be done via pg_dump or Supabase dashboard
+    res.status(501).json({
+      error: "Database backup not available for PostgreSQL via this endpoint",
+      message: "Please use Supabase dashboard or pg_dump for database backups"
+    });
   });
 
   app.post("/api/admin/restore", isAuthenticated, requireAdmin, upload.single('file'), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No backup file uploaded" });
-      }
-
-      const backupPath = req.file.path;
-      const dbPath = path.join(process.cwd(), 'database.sqlite');
-
-      console.log('Starting database restore...');
-
-      // Close the database connection to release the file lock
-      sqlite.close();
-
-      // Replace the current database with the backup
-      await fs.copyFile(backupPath, dbPath);
-
-      console.log('Database restored from backup.');
-
-      // Send success response before exiting
-      res.json({
-        success: true,
-        message: "Database restored successfully. The server will restart now to apply changes."
-      });
-
-    } catch (error) {
-      console.error("Restore error:", error);
-      res.status(500).json({ error: "Failed to process restore. Server may need restart." });
-    }
+    // PostgreSQL restores should be done via psql or Supabase dashboard
+    res.status(501).json({
+      error: "Database restore not available for PostgreSQL via this endpoint",
+      message: "Please use Supabase dashboard or psql for database restores"
+    });
   });
 
   // --- Customer Feedback Route ---
