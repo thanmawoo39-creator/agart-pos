@@ -37,21 +37,37 @@ const allowlist = [
 const ignoreVitePlugin: Plugin = {
   name: "ignore-vite",
   setup(build) {
-    // Intercept imports to ./vite and return empty module
-    build.onResolve({ filter: /^\.\/vite$/ }, (args) => {
+    // Intercept any imports that reference ./vite (with or without .js extension)
+    build.onResolve({ filter: /^\.\/vite(\.js)?$/ }, (args) => {
       return {
         path: args.path,
         namespace: "ignore-vite",
       };
     });
 
-    // Return an empty module for vite imports
+    // Also intercept the vite package itself
+    build.onResolve({ filter: /^vite$/ }, (args) => {
+      return {
+        path: args.path,
+        namespace: "ignore-vite",
+      };
+    });
+
+    // Return an empty module for all vite-related imports
     build.onLoad({ filter: /.*/, namespace: "ignore-vite" }, () => {
       return {
         contents: `
+          // Stub module - vite is not available in production
           export function setupVite() {
-            throw new Error("Vite is not available in production mode");
+            console.warn("Vite is not available in production mode");
           }
+          export function createServer() {
+            console.warn("Vite is not available in production mode");
+          }
+          export function createLogger() {
+            return { info: () => {}, warn: () => {}, error: () => {} };
+          }
+          export default {};
         `,
         loader: "js",
       };
