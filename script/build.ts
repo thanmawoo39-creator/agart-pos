@@ -1,4 +1,4 @@
-import { build as esbuild } from "esbuild";
+import { build as esbuild, type Plugin } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
 
@@ -32,6 +32,33 @@ const allowlist = [
   "zod-validation-error",
 ];
 
+// Plugin to completely ignore vite-related imports in production build
+// This prevents "Cannot find package 'vite'" error in production
+const ignoreVitePlugin: Plugin = {
+  name: "ignore-vite",
+  setup(build) {
+    // Intercept imports to ./vite and return empty module
+    build.onResolve({ filter: /^\.\/vite$/ }, (args) => {
+      return {
+        path: args.path,
+        namespace: "ignore-vite",
+      };
+    });
+
+    // Return an empty module for vite imports
+    build.onLoad({ filter: /.*/, namespace: "ignore-vite" }, () => {
+      return {
+        contents: `
+          export function setupVite() {
+            throw new Error("Vite is not available in production mode");
+          }
+        `,
+        loader: "js",
+      };
+    });
+  },
+};
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
@@ -50,14 +77,15 @@ async function buildAll() {
     entryPoints: ["server/index.ts"],
     platform: "node",
     bundle: true,
-    format: "cjs",
-    outfile: "dist/index.cjs",
+    format: "esm",
+    outfile: "dist/index.js",
     define: {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
     external: externals,
     logLevel: "info",
+    plugins: [ignoreVitePlugin],
   });
 }
 
