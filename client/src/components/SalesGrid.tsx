@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { QRScanner } from '@/components/QRScanner';
 import { Product } from '@/types/sales';
 import { API_BASE_URL } from '@/lib/api-config';
+import { useCurrency } from '@/hooks/use-currency';
 
 interface SalesGridProps {
   products: Product[];
@@ -27,6 +28,7 @@ export function SalesGrid({
   onScanSuccess,
   addToCart
 }: SalesGridProps) {
+  const { formatCurrency } = useCurrency();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
 
   const filteredProducts = products.filter(product =>
@@ -39,7 +41,7 @@ export function SalesGrid({
       <CardContent className="space-y-4">
         {/* QR Scanner */}
         <QRScanner onScanSuccess={onScanSuccess} products={products} />
-        
+
         {/* Search Bar and View Toggle */}
         <div className="flex gap-4 items-center">
           <div className="relative flex-1">
@@ -60,7 +62,7 @@ export function SalesGrid({
             </Button>
           </div>
         </div>
-        
+
         {/* Product Display Area */}
         {productsLoading ? (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -79,13 +81,12 @@ export function SalesGrid({
                     ? product.imageUrl
                     : `${API_BASE_URL}/uploads/${product.imageUrl}`)
                   : undefined;
-              
+
               return (
                 <Card
                   key={product.id}
-                  className={`cursor-pointer hover:shadow-md transition-shadow ${
-                    product.stock === 0 ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
+                  className={`cursor-pointer hover:shadow-md transition-shadow ${product.stock === 0 ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
                   onClick={() => addToCart(product)}
                 >
                   <CardContent className="p-4">
@@ -111,7 +112,7 @@ export function SalesGrid({
                       </div>
                     </div>
                     <h3 className="font-medium text-sm truncate">{product.name}</h3>
-                    <p className="text-lg font-bold">${product.price.toFixed(2)}</p>
+                    <p className="text-lg font-bold">{formatCurrency(Number(product.price) || 0)}</p>
                     <Badge variant={product.stock > 10 ? "default" : "destructive"}>
                       Stock: {product.stock}
                     </Badge>
@@ -160,9 +161,9 @@ export function SalesGrid({
                     <TableCell>{product.name}</TableCell>
                     <TableCell>{product.category}</TableCell>
                     <TableCell>{product.stock}</TableCell>
-                    <TableCell>${product.price.toFixed(2)}</TableCell>
+                    <TableCell>{formatCurrency(Number(product.price) || 0)}</TableCell>
                     <TableCell>
-                      <Button 
+                      <Button
                         onClick={() => addToCart(product)}
                         disabled={product.stock === 0}
                         className={product.stock === 0 ? "opacity-50 cursor-not-allowed" : ""}

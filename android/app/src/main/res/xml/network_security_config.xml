@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Configuration for AgartPOS
+
+  This configuration allows cleartext (HTTP) traffic for:
+  - Local development (localhost, 10.0.2.2 for Android emulator)
+  - Local network IPs (192.168.x.x, 10.x.x.x)
+
+  HTTPS is enforced for all other domains in production.
+-->
+<network-security-config>
+    <!-- Base configuration: HTTPS required by default -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Allow cleartext for localhost (development) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <!-- Android emulator host machine -->
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+
+    <!-- Allow cleartext for local network (LAN testing) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Common private network ranges -->
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <domain includeSubdomains="true">192.168.1.0</domain>
+        <domain includeSubdomains="true">192.168.2.0</domain>
+        <domain includeSubdomains="true">10.0.0.0</domain>
+        <!-- Serveo tunnel (if using HTTP) -->
+        <domain includeSubdomains="true">serveo.net</domain>
+        <domain includeSubdomains="true">serveousercontent.com</domain>
+    </domain-config>
+
+    <!-- Production domains - HTTPS enforced -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">agartpos.app</domain>
+        <domain includeSubdomains="true">agartpos.com</domain>
+    </domain-config>
+</network-security-config>

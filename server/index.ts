@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { exec } from 'child_process';
 import os from 'os';
 import { ensureNonEmptySqlMigrations, runMigrations } from './lib/run-migrations';
+import { sqlite } from './lib/db';
 
 function getLocalIpAddress() {
   const interfaces = os.networkInterfaces();
@@ -82,9 +83,28 @@ async function killPortIfInUse(port: number) {
 // Load environment as early as possible using an explicit path resolution so
 // the .env file is found regardless of process cwd.
 // .env is expected at repository root (one level above /server)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const envPath = path.resolve(__dirname, '../.env');
+// CJS/ESM compatible path resolution with safe detection
+let __dirnameResolved: string;
+try {
+  // Check if we are in a CommonJS environment (Production Build)
+  // Use eval to prevent bundler from transforming this check
+  const hasDirname = typeof (globalThis as any).__dirname !== 'undefined' ||
+    (typeof __dirname !== 'undefined' && __dirname !== '');
+
+  if (hasDirname && typeof __dirname === 'string' && __dirname.length > 0) {
+    __dirnameResolved = __dirname;
+  } else {
+    // We are in an ES Module environment (Development Mode)
+    const currentFileUrl = import.meta.url;
+    const __filename = fileURLToPath(currentFileUrl);
+    __dirnameResolved = path.dirname(__filename);
+  }
+} catch (error) {
+  // Fallback to current working directory
+  console.log('[PATH] Fallback to process.cwd()');
+  __dirnameResolved = process.cwd();
+}
+const envPath = path.resolve(__dirnameResolved, '../.env');
 dotenv.config({ path: envPath, override: true });
 
 // Kill any existing process on port 5000 before starting
@@ -104,6 +124,9 @@ import { registerRoutes } from "./routes";
 import { storage } from "./storage";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
+import swaggerUi from "swagger-ui-express";
+import swaggerJSDoc from "swagger-jsdoc";
 
 // Seed default stores function
 async function seedDefaultStores() {
@@ -115,17 +138,17 @@ async function seedDefaultStores() {
     console.log(`Found ${existingStores.length} existing stores`);
 
     if (existingStores.length === 0) {
-      // Create default stores
+      // Create default stores (use lowercase types to match schema)
       const mainStore = {
         name: 'Main Store',
-        type: 'Grocery' as const,
+        type: 'grocery' as const,
         settings: JSON.stringify({ location: '123 Main Street', phone: '+1 234 567 8900' }),
         isActive: 'true' as const
       };
 
       const restaurant = {
         name: 'Restaurant',
-        type: 'Restaurant' as const,
+        type: 'restaurant' as const,
         settings: JSON.stringify({ location: '456 Food Avenue', phone: '+1 234 567 8901' }),
         isActive: 'true' as const
       };
@@ -400,7 +423,7 @@ declare module "express-session" {
     user?: {
       id: string;
       name: string;
-      role: 'owner' | 'manager' | 'cashier';
+      role: 'owner' | 'manager' | 'cashier' | 'kitchen';
       businessUnitId?: string;
     };
   }
@@ -415,8 +438,35 @@ app.use(
   }),
 );
 
-// Increase urlencoded body size to allow l‌ေarge base64 image strings
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
+
+// Increase urlencoded body size to allow l‌arge base64 image strings
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Middleware to set Bypass-Tunnel-Reminder header for LocalTunnel
+// Middleware to set Bypass-Tunnel-Reminder header to avoid LocalTunnel prompt
+app.use((req, res, next) => {
+  req.headers['bypass-tunnel-reminder'] = 'true';
+  res.setHeader('Bypass-Tunnel-Reminder', 'true');
+  next();
+});
+
+// CORS middleware - Allow cross-origin requests for Cloudflare/external access
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  // Allow all origins for now (can restrict to specific Cloudflare domains later)
+  res.header('Access-Control-Allow-Origin', origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // Session middleware for authentication
 app.use(
@@ -444,6 +494,36 @@ app.use((req, res, next) => {
     next();
   }
 });
+
+// Swagger / OpenAPI
+const swaggerSpec = swaggerJSDoc({
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "Agart POS API",
+      version: "1.0.0",
+    },
+    servers: [{ url: "http://localhost:5000" }],
+    components: {
+      securitySchemes: {
+        cookieAuth: {
+          type: "apiKey",
+          in: "cookie",
+          name: "connect.sid",
+        },
+      },
+    },
+  },
+  apis: [
+    path.join(__dirnameResolved, "routes.ts"),
+    path.join(__dirnameResolved, "routes", "**", "*.ts"),
+  ],
+});
+
+app.get("/api/docs.json", (_req, res) => {
+  res.json(swaggerSpec);
+});
+app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -506,6 +586,26 @@ import { eq, sql } from 'drizzle-orm';
 
     await runMigrations();
 
+    // Initialize Socket.IO server
+    const io = new SocketIOServer(httpServer, {
+      cors: {
+        origin: "*", // Allow all origins for development
+        methods: ["GET", "POST"]
+      }
+    });
+
+    // Socket.IO connection handling
+    io.on('connection', (socket) => {
+      console.log('🔌 Client connected:', socket.id);
+
+      socket.on('disconnect', () => {
+        console.log('🔌 Client disconnected:', socket.id);
+      });
+    });
+
+    // Export io for use in routes
+    (global as any).io = io;
+
     await registerRoutes(httpServer, app);
 
     // Ensure DB seeded (defensive - storage.initialize already calls this,
@@ -518,6 +618,12 @@ import { eq, sql } from 'drizzle-orm';
       await seedDefaultStores();
 
       await ensureRestaurantTables();
+
+      // LEGACY PURGE: Delete Broken Customers
+      console.log('☢️ Running Ghost Customer Purge...');
+      sqlite.prepare(`DELETE FROM customers WHERE origin_unit IS NULL OR business_unit_id IS NULL`).run();
+      console.log('✅ Ghost Customers Purged.');
+
     } catch (err) {
       console.error('Error seeding initial data:', err);
     }
@@ -549,6 +655,93 @@ import { eq, sql } from 'drizzle-orm';
       res.status(status).json({ message });
       throw err;
     });
+
+    // Migration: Add paymentStatus and orderSource columns if they don't exist
+    try {
+      // Use sqlite (raw Better-SQLite3) instead of db (Drizzle wrapper) for raw SQL
+      const salesTableInfo: any[] = sqlite.prepare("PRAGMA table_info(sales)").all();
+
+      // Migration: Add special_stock to products if missing
+      const productsTableInfo: any[] = sqlite.prepare("PRAGMA table_info(products)").all();
+      const hasSpecialStock = productsTableInfo.some((col: any) => col.name === 'special_stock');
+      if (!hasSpecialStock) {
+        console.log("Adding special_stock column to products table...");
+        sqlite.prepare(`
+          ALTER TABLE products 
+          ADD COLUMN special_stock INTEGER NOT NULL DEFAULT 0
+        `).run();
+        console.log("✅ special_stock column added successfully");
+      } else {
+        console.log("✅ special_stock column already exists");
+      }
+
+      const hasPaymentStatus = salesTableInfo.some((col: any) => col.name === 'payment_status');
+      const hasOrderSource = salesTableInfo.some((col: any) => col.name === 'order_source');
+
+      if (!hasPaymentStatus) {
+        console.log("Adding payment_status column to sales table...");
+        sqlite.prepare(`
+          ALTER TABLE sales 
+          ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'paid'
+        `).run();
+        console.log("✅ payment_status column added successfully");
+      } else {
+        console.log("✅ payment_status column already exists");
+      }
+
+      if (!hasOrderSource) {
+        console.log("Adding order_source column to sales table...");
+        sqlite.prepare(`
+          ALTER TABLE sales 
+          ADD COLUMN order_source TEXT NOT NULL DEFAULT 'pos'
+        `).run();
+        console.log("✅ order_source column added successfully");
+      } else {
+        console.log("✅ order_source column already exists");
+      }
+
+      // Migration: Add guest ordering support columns
+      const staffTableInfo: any[] = sqlite.prepare("PRAGMA table_info(staff)").all();
+      const hasIsGuest = staffTableInfo.some((col: any) => col.name === 'is_guest');
+
+      if (!hasIsGuest) {
+        console.log("Adding is_guest column to staff table...");
+        sqlite.prepare(`
+          ALTER TABLE staff 
+          ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0
+        `).run();
+        console.log("✅ is_guest column added successfully");
+      } else {
+        console.log("✅ is_guest column already exists");
+      }
+
+      const hasPhoneVerified = salesTableInfo.some((col: any) => col.name === 'phone_verified');
+      const hasGuestId = salesTableInfo.some((col: any) => col.name === 'guest_id');
+
+      if (!hasPhoneVerified) {
+        console.log("Adding phone_verified column to sales table...");
+        sqlite.prepare(`
+          ALTER TABLE sales 
+          ADD COLUMN phone_verified INTEGER DEFAULT 0
+        `).run();
+        console.log("✅ phone_verified column added successfully");
+      } else {
+        console.log("✅ phone_verified column already exists");
+      }
+
+      if (!hasGuestId) {
+        console.log("Adding guest_id column to sales table...");
+        sqlite.prepare(`
+          ALTER TABLE sales 
+          ADD COLUMN guest_id TEXT
+        `).run();
+        console.log("✅ guest_id column added successfully");
+      } else {
+        console.log("✅ guest_id column already exists");
+      }
+    } catch (error) {
+      console.error("Error adding payment status/order source/guest columns:", error);
+    }
 
     // Serve uploaded files statically using absolute path to project root
     // IMPORTANT: Use process.cwd() to match multer's upload destination

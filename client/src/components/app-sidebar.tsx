@@ -14,7 +14,10 @@ import {
   Camera,
   Settings,
   ChefHat,
-  Store
+  Truck,
+  List,
+  Map,
+  Database
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -34,27 +37,50 @@ import { ShiftButton } from "@/components/shift-button";
 import { ShiftManagement } from "@/components/shift-management";
 import { useBusinessMode } from "@/contexts/BusinessModeContext";
 import { API_BASE_URL } from "@/lib/api-config";
-import type { StaffRole } from "@shared/schema";
+import { InstallPWAButton } from "@/components/InstallPWAButton";
+import type { BusinessUnit, StaffRole } from "@shared/schema";
+
+// STRICT BUSINESS UNIT ISOLATION: Constants for separate environments
+// Restaurant = Kitchen, Delivery, Catering features
+// Grocery = Fast-paced retail checkout (no kitchen/delivery)
+const RESTAURANT_BUSINESS_UNIT_ID = '2';
 
 interface NavItem {
   titleKey: string;
   url: string;
   icon: typeof LayoutDashboard;
   roles: StaffRole[];
+  // Optional: restrict to specific business unit types
+  businessUnitTypes?: ('restaurant' | 'grocery' | 'pharmacy' | 'other')[];
+  // Optional: restrict to specific business unit ID
+  businessUnitId?: string;
 }
 
 const navItems: NavItem[] = [
+  // COMMON: Available to all business units
   { titleKey: "navigation.dashboard", url: "/", icon: LayoutDashboard, roles: ["owner", "manager"] },
-  { titleKey: "navigation.sales", url: "/sales", icon: ShoppingCart, roles: ["owner", "manager", "cashier"] },
-  { titleKey: "navigation.kitchen", url: "/kitchen", icon: ChefHat, roles: ["owner", "manager", "cashier", "kitchen"] },
+  { titleKey: "navigation.sales", url: "/sales", icon: ShoppingCart, roles: ["owner", "manager", "cashier", "waiter"] },
   { titleKey: "navigation.inventory", url: "/inventory", icon: Boxes, roles: ["owner", "manager"] },
   { titleKey: "navigation.customers", url: "/customers", icon: Users, roles: ["owner", "manager", "cashier"] },
   { titleKey: "navigation.ledger", url: "/ledger", icon: Receipt, roles: ["owner", "manager"] },
   { titleKey: "navigation.reports", url: "/reports", icon: BarChart3, roles: ["owner", "manager"] },
   { titleKey: "navigation.recognize", url: "/recognize", icon: Camera, roles: ["owner", "manager", "cashier"] },
+
+  // RESTAURANT & CATERING FEATURES
+  // Unit 1 (Main) gets Everything. Unit 2 (Rest) gets Order Manager Only.
+  { titleKey: "navigation.kitchen", url: "/kitchen", icon: ChefHat, roles: ["owner", "manager", "cashier", "waiter", "kitchen"], businessUnitId: "2" }, // Restaurant Only
+  { titleKey: "navigation.delivery", url: "/delivery-dashboard", icon: Truck, roles: ["owner", "manager", "cashier"], businessUnitId: "2" }, // Restaurant Only
+  { titleKey: "Live Tracking", url: "/admin/tracking", icon: Map, roles: ["owner", "manager"], businessUnitId: "2" },
+
+  // SHARED / CATERING SPECIFIC
+  // Unit 1: See Both. Unit 2: See Only Orders.
+  { titleKey: "navigation.cateringKitchen", url: "/catering/kitchen", icon: ChefHat, roles: ["owner", "manager", "cashier"] }, // Logic handled in dynamic filter
+  { titleKey: "navigation.cateringOrders", url: "/catering/orders", icon: List, roles: ["owner", "manager", "cashier"] },     // Logic handled in dynamic filter
+  { titleKey: "navigation.deliveryApp", url: "/delivery", icon: Truck, roles: ["owner", "manager", "cashier"], businessUnitId: "2" },
 ];
 
 const adminItems: NavItem[] = [
+  { titleKey: "navigation.backup", url: "/backup", icon: Database, roles: ["owner"] },
   { titleKey: "navigation.expenses", url: "/expenses", icon: Wallet, roles: ["owner"] },
   { titleKey: "navigation.staff", url: "/staff", icon: UserCog, roles: ["owner"] },
   { titleKey: "navigation.attendance", url: "/attendance", icon: ClipboardList, roles: ["owner"] },
@@ -65,10 +91,14 @@ export function AppSidebar() {
   const { t } = useTranslation();
   const [location] = useLocation();
   const { currentStaff, isLoggedIn, isOwner } = useAuth();
+
+  // Security Fix: Hide Admin Sidebar for Customers
+  if ((currentStaff?.role as any) === 'customer') return null;
+
   const { setOpen, setOpenMobile, isMobile, state } = useSidebar();
 
   const { businessUnit } = useBusinessMode();
-  const { data: businessUnits = [] } = useQuery<any[]>({
+  const { data: businessUnits = [] } = useQuery<BusinessUnit[]>({
     queryKey: ['/api/business-units'],
     queryFn: async () => {
       const response = await fetch(`${API_BASE_URL}/api/business-units`, { credentials: 'include' });
@@ -94,14 +124,29 @@ export function AppSidebar() {
   const filteredNavItems = navItems.filter(item => canAccess(item.roles));
   const filteredAdminItems = adminItems.filter(item => canAccess(item.roles));
 
-  const activeBusinessUnit = businessUnits.find((u: any) => u.id === businessUnit) || null;
-  const activeTypeRaw = (activeBusinessUnit as any)?.type;
-  const activeType = typeof activeTypeRaw === 'string' ? activeTypeRaw.toLowerCase() : '';
-  const isRestaurant = activeType === 'restaurant';
-  const isKitchenOrWaiter = currentRole === 'kitchen' || (currentRole as any) === 'waiter';
+  const activeBusinessUnit = businessUnits.find((u) => u.id === businessUnit) || null;
+  const isRestaurant = activeBusinessUnit?.type === 'restaurant';
+  const isKitchenOrWaiter = currentRole === 'kitchen' || currentRole === 'waiter';
 
   const dynamicNavItems = filteredNavItems.filter((item) => {
+    // STRICT ISOLATION: Check businessUnitId if specified
+    if (item.businessUnitId && item.businessUnitId !== businessUnit) return false;
+
+    // Unit 2 (Restaurant) Restrictions:
+    if (businessUnit === '2') {
+      // Hide 'Catering Kitchen' from Unit 2
+      if (item.url === '/catering/kitchen') return false;
+    }
+
+    // Unit 1 (Main Store) Restrictions:
+    if (businessUnit === '1') {
+      // Hide 'Restaurant Kitchen' (standard kitchen) from Unit 1? 
+      // User didn't specify, but usually Unit 1 is Grocery/Main. 
+      // Assuming Unit 1 wants Catering stuff.
+    }
+
     if (item.url === '/kitchen' && !isRestaurant) return false;
+    if (item.url === '/delivery-dashboard' && !isRestaurant) return false; // Only show delivery for restaurants
     if (item.url === '/inventory' && isKitchenOrWaiter) return false;
     return true;
   });
@@ -111,12 +156,18 @@ export function AppSidebar() {
     return true;
   });
 
+  // Kitchen role only sees kitchen page
   const kitchenOnlyNavItems = dynamicNavItems.filter((item) => item.url === '/kitchen');
+
+  // Waiter role sees: Sales (POS), Kitchen (Tables/Orders)
+  const waiterNavItems = dynamicNavItems.filter((item) =>
+    item.url === '/sales' || item.url === '/kitchen'
+  );
 
   return (
     <Sidebar>
       <SidebarHeader className="p-4 md:p-5 border-b border-sidebar-border">
-        <Link href={currentRole === 'kitchen' ? "/kitchen" : "/"} data-testid="link-home" onClick={handleNavClick}>
+        <Link href={currentRole === 'kitchen' ? "/kitchen" : currentRole === 'waiter' ? "/sales" : "/"} data-testid="link-home" onClick={handleNavClick}>
           <div className="flex items-center justify-center gap-2.5">
             <div className="flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden flex-shrink-0">
               <img
@@ -138,7 +189,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {(currentRole === 'kitchen' ? kitchenOnlyNavItems : dynamicNavItems).map((item) => {
+              {(currentRole === 'kitchen' ? kitchenOnlyNavItems : currentRole === 'waiter' ? waiterNavItems : dynamicNavItems).map((item) => {
                 const isActive = location === item.url;
                 return (
                   <SidebarMenuItem key={item.titleKey}>
@@ -148,7 +199,14 @@ export function AppSidebar() {
                       className={`py-2.5 px-3 transition-all duration-200 ${isActive ? 'bg-primary/10 shadow-sm' : 'hover:bg-muted/50'}`}
                     >
                       <Link href={item.url} data-testid={`link-${t(item.titleKey).toLowerCase().replace(/\s+/g, '-').replace(/[()]/g, '')}`} onClick={handleNavClick}>
-                        <item.icon className={`w-[18px] h-[18px] ${isActive ? 'text-primary' : 'text-muted-foreground'}`} strokeWidth={isActive ? 2.5 : 2} />
+                        <item.icon
+                          className={`w-[18px] h-[18px] 
+                                ${item.url === '/catering/kitchen' ? '!text-[#FF6B35]' : ''} 
+                                ${item.url === '/catering/orders' ? '!text-[#007bff]' : ''} 
+                                ${!['/catering/kitchen', '/catering/orders'].includes(item.url) ? (isActive ? 'text-primary' : 'text-muted-foreground') : ''}
+                            `}
+                          strokeWidth={isActive ? 2.5 : 2}
+                        />
                         <span className={`text-sm ${isActive ? 'font-semibold' : 'font-medium'}`}>{t(item.titleKey)}</span>
                       </Link>
                     </SidebarMenuButton>
@@ -158,7 +216,7 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        {dynamicAdminItems.length > 0 && (
+        {dynamicAdminItems.length > 0 && currentRole !== 'waiter' && (
           <SidebarGroup>
             <SidebarGroupLabel className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Admin</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -185,12 +243,17 @@ export function AppSidebar() {
           </SidebarGroup>
         )}
 
-        {/* Shift Management */}
-        {currentRole !== 'kitchen' && (
+        {/* Shift Management - hidden for kitchen and waiter roles */}
+        {currentRole !== 'kitchen' && currentRole !== 'waiter' && (
           <div className="px-3 py-2">
             <ShiftManagement className="w-full" />
           </div>
         )}
+
+        {/* PWA Install Button */}
+        <div className="px-3 py-2 mt-auto">
+          <InstallPWAButton variant="outline" className="w-full" />
+        </div>
       </SidebarContent>
     </Sidebar>
   );

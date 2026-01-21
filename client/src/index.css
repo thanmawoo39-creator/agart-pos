@@ -199,8 +199,115 @@
     @apply border-border;
   }
 
+  /* Force High Contrast Text - Light Mode */
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    @apply font-sans antialiased;
+    background-color: #ffffff;
+    color: #0f172a;
+    /* Slate-900 - High contrast dark text */
+  }
+
+  /* Force High Contrast Text - Dark Mode */
+  .dark body {
+    background-color: #020617;
+    /* Slate-950 */
+    color: #f1f5f9;
+    /* Slate-100 - High contrast light text */
+  }
+
+  /* Global table text visibility fix - always inherit from body */
+  table,
+  th,
+  td {
+    color: inherit;
+  }
+
+  /* Light mode table - force dark text */
+  table th,
+  table td {
+    color: #0f172a;
+    /* Slate-900 */
+  }
+
+  /* Dark mode table - force light text */
+  .dark table,
+  .dark th,
+  .dark td {
+    color: #f1f5f9 !important;
+    /* Slate-100 - Force visibility */
+  }
+
+  /* Ensure slate colors have dark mode fallbacks */
+  .dark .text-slate-500 {
+    color: hsl(215 20% 65%);
+  }
+
+  .dark .text-slate-600 {
+    color: hsl(215 20% 75%);
+  }
+
+  .dark .text-slate-700 {
+    color: hsl(215 20% 85%);
+  }
+
+  /* Safe Area Insets for PWA/Mobile */
+  html {
+    /* Enable safe area environment variables */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+}
+
+/* Safe Area Utilities for iPhone notch/home bar */
+@layer utilities {
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .pl-safe {
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .pr-safe {
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .mt-safe {
+    margin-top: env(safe-area-inset-top, 0px);
+  }
+
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .ml-safe {
+    margin-left: env(safe-area-inset-left, 0px);
+  }
+
+  .mr-safe {
+    margin-right: env(safe-area-inset-right, 0px);
+  }
+
+  .inset-safe {
+    top: env(safe-area-inset-top, 0px);
+    right: env(safe-area-inset-right, 0px);
+    bottom: env(safe-area-inset-bottom, 0px);
+    left: env(safe-area-inset-left, 0px);
+  }
+
+  /* Touch-friendly minimum tap targets */
+  .touch-target {
+    min-height: 48px;
+    min-width: 48px;
+  }
+
+  /* Mobile scrolling optimization */
+  .scroll-touch {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 }
 
@@ -243,7 +350,7 @@
     transform: translateX(-50%);
   }
 
-  @keyframes scan {
+  @key frames scan {
     0% {
       top: -100%;
     }
@@ -251,6 +358,53 @@
     100% {
       top: 100%;
     }
+  }
+
+  /* Blinking border animation for incoming kitchen orders */
+  @keyframes pulse-border {
+
+    0%,
+    100% {
+      border-left-color: rgb(59 130 246);
+      box-shadow: 0 0 0 0 rgb(59 130 246 / 0.4);
+    }
+
+    50% {
+      border-left-color: rgb(96 165 250);
+      box-shadow: 0 0 0 4px rgb(59 130 246 / 0.1);
+    }
+  }
+
+  .animate-pulse-border {
+    animation: pulse-border 1.5s ease-in-out infinite;
+  }
+
+  /* Shake animation for validation errors (payment slip upload) */
+  @keyframes shake {
+
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+
+    10%,
+    30%,
+    50%,
+    70%,
+    90% {
+      transform: translateX(-5px);
+    }
+
+    20%,
+    40%,
+    60%,
+    80% {
+      transform: translateX(5px);
+    }
+  }
+
+  .animate-shake {
+    animation: shake 0.5s ease-in-out;
   }
 
   /* Hide ugly search cancel button in Chrome until we can style it properly */

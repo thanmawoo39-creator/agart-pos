@@ -1,361 +1,226 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useRoute, Link } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth-context"; // Actually we might need a separate context or reuse this if generic
+// Assuming useAuth handles staff primarily. For customer, we used session cookies.
+// Ideally useAuth should be aware of 'role: customer'.
+// If not, we fetch profile directly here.
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loader2, LogOut, Trash2, User, ShoppingBag, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useAuth } from "@/lib/auth-context";
-import { useBusinessMode } from "@/contexts/BusinessModeContext";
-import {
-  ArrowLeft,
-  User,
-  CreditCard,
-  AlertTriangle,
-  ArrowUpRight,
-  ArrowDownRight,
-  DollarSign,
-  Phone,
-  Mail,
-  Barcode,
-} from "lucide-react";
-import type { Customer, CreditLedger } from "@shared/schema";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { useLocation } from "wouter";
 
 export default function CustomerProfile() {
   const { toast } = useToast();
-  const { currentStaff } = useAuth();
-  const { businessUnit } = useBusinessMode();
-  const businessUnitId = businessUnit;
-  const [, params] = useRoute("/customers/:id");
-  const customerId = params?.id;
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
 
-  const { data: customer, isLoading: customerLoading } = useQuery<Customer>({
-    queryKey: [`/api/customers/${customerId}?businessUnitId=${businessUnitId}`],
-    enabled: !!customerId && !!businessUnitId,
+  // Fetch Profile
+  const { data: profile, isLoading, error } = useQuery({
+    queryKey: ['/api/customer/profile'],
+    retry: false,
+    queryFn: async () => {
+      const res = await fetch('/api/customer/profile');
+      if (!res.ok) throw new Error('Not logged in');
+      return res.json();
+    }
   });
 
-  const { data: ledgerEntries, isLoading: ledgerLoading } = useQuery<CreditLedger[]>({
-    queryKey: [`/api/customers/${customerId}/ledger?businessUnitId=${businessUnitId}`],
-    enabled: !!customerId && !!businessUnitId,
+  // Fetch Orders
+  const { data: orders } = useQuery({
+    queryKey: ['/api/customer/orders'],
+    enabled: !!profile,
+    queryFn: async () => {
+      const res = await fetch('/api/customer/orders');
+      if (!res.ok) throw new Error('Failed to fetch orders');
+      return res.json();
+    }
   });
 
-  const addPaymentMutation = useMutation({
-    mutationFn: async (amount: number) => {
-      return apiRequest("POST", `/api/customers/${customerId}/repayment`, {
-        amount,
-        businessUnitId,
-        createdBy: currentStaff?.name || "Unknown"
+  // Logout Mutation
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      await fetch('/api/customer/logout', { method: 'POST' });
+    },
+    onSuccess: () => {
+      setLocation('/lunch-menu'); // Redirect to menu
+    }
+  });
+
+  // Delete Account Mutation
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      await fetch('/api/customer/account', { method: 'DELETE' });
+    },
+    onSuccess: () => {
+      toast({ title: 'Account Deleted', description: 'Your data has been anonymized. Goodbye!' });
+      setLocation('/lunch-menu');
+    }
+  });
+
+  // Update Profile Mutation
+  const updateMutation = useMutation({
+    mutationFn: async (name: string) => {
+      await fetch('/api/customer/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
       });
     },
     onSuccess: () => {
-      toast({
-        title: "Repayment Recorded",
-        description: "Repayment has been recorded successfully",
-      });
-      setPaymentAmount("");
-      setIsPaymentDialogOpen(false);
-      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}?businessUnitId=${businessUnitId}`] });
-      queryClient.invalidateQueries({ queryKey: [`/api/customers/${customerId}/ledger?businessUnitId=${businessUnitId}`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/summary"] });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
+      queryClient.invalidateQueries({ queryKey: ['/api/customer/profile'] });
+      toast({ title: 'Updated', description: 'Profile updated successfully' });
+    }
   });
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
-  };
+  const [editName, setEditName] = useState('');
 
-  const formatDate = (timestamp: string) => {
-    return new Date(timestamp).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  if (customerLoading) {
-    return (
-      <div className="p-4 md:p-6 space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
+  // Protect Route
+  if (error) {
+    setLocation('/lunch-menu'); // or login
+    return null;
   }
 
-  if (!customer) {
-    return (
-      <div className="p-4 md:p-6">
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <h3 className="text-lg font-medium text-foreground mb-2">
-            Customer Not Found
-          </h3>
-          <Link href="/customers">
-            <Button variant="outline">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Customers
-            </Button>
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const isHighRisk = customer.riskTag === "high" ||
-    (customer.creditLimit > 0 && customer.currentBalance > customer.creditLimit * 0.8);
-  const creditUsagePercent = customer.creditLimit > 0
-    ? Math.min(100, (customer.currentBalance / customer.creditLimit) * 100)
-    : 0;
+  if (isLoading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>;
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <Link href="/customers">
-          <Button variant="ghost" size="icon" data-testid="button-back">
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
-        </Link>
-        <div className="flex-1">
-          <h1 className="text-xl md:text-2xl font-semibold text-foreground" data-testid="text-customer-name">
-            {customer.name}
-          </h1>
-          <p className="text-xs md:text-sm text-muted-foreground">
-            Customer Profile
-          </p>
-        </div>
-        <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-add-payment">
-              <DollarSign className="w-4 h-4 mr-2" />
-              Repayment
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Record Repayment</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 pt-4">
-              <div>
-                <p className="text-sm text-muted-foreground mb-2">
-                  Current Balance: <span className="font-bold text-foreground">{formatCurrency(customer.currentBalance)}</span>
-                </p>
-              </div>
-              <Input
-                type="number"
-                placeholder="Repayment amount"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-                data-testid="input-payment-amount"
-              />
-              <Button
-                className="w-full"
-                onClick={() => {
-                  const amount = parseFloat(paymentAmount);
-                  if (amount > 0) {
-                    addPaymentMutation.mutate(amount);
-                  }
-                }}
-                disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || addPaymentMutation.isPending}
-                data-testid="button-submit-payment"
-              >
-                {addPaymentMutation.isPending ? "Processing..." : "Record Repayment"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+    <div className="container mx-auto p-4 max-w-4xl">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-slate-800">My Account</h1>
+        <Button variant="outline" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>
+          <LogOut className="mr-2 h-4 w-4" /> Logout
+        </Button>
       </div>
 
-      {/* Customer Info Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-indigo-500/10">
-                <User className="w-6 h-6 text-indigo-500" />
+      <div className="grid gap-6 md:grid-cols-3">
+        {/* Sidebar / Profile Card */}
+        <div className="md:col-span-1 space-y-4">
+          <Card>
+            <CardHeader className="text-center">
+              <div className="mx-auto w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center mb-2">
+                <User className="h-10 w-10 text-orange-600" />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-muted-foreground">Contact Info</p>
-                <div className="space-y-1 mt-1">
-                  {customer.phone && (
-                    <p className="text-xs flex items-center gap-1">
-                      <Phone className="w-3 h-3" /> {customer.phone}
-                    </p>
-                  )}
-                  {customer.email && (
-                    <p className="text-xs flex items-center gap-1">
-                      <Mail className="w-3 h-3" /> {customer.email}
-                    </p>
-                  )}
-                  {customer.barcode && (
-                    <p className="text-xs flex items-center gap-1">
-                      <Barcode className="w-3 h-3" />
-                      <Badge variant="secondary" className="font-mono text-[10px]">{customer.barcode}</Badge>
-                    </p>
-                  )}
+              <CardTitle>{profile?.name}</CardTitle>
+              <CardDescription>{profile?.phone}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Display Name</label>
+                <div className="flex gap-2">
+                  <Input
+                    defaultValue={profile?.name}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Your Name"
+                  />
+                  <Button size="sm" onClick={() => updateMutation.mutate(editName || profile.name)}>Save</Button>
                 </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-4">
-              <div className={`flex items-center justify-center w-12 h-12 rounded-full ${customer.currentBalance > 0 ? "bg-amber-500/10" : "bg-emerald-500/10"}`}>
-                <CreditCard className={`w-6 h-6 ${customer.currentBalance > 0 ? "text-amber-500" : "text-emerald-500"}`} />
+              <div className="pt-4 border-t">
+                <h4 className="text-sm font-medium text-slate-500 mb-2">Member Since</h4>
+                <p className="text-sm">{new Date(profile?.joinedAt).toLocaleDateString()}</p>
               </div>
-              <div className="flex-1">
-                <p className="text-sm text-muted-foreground">Current Balance</p>
-                <p className={`text-2xl font-bold tabular-nums ${customer.currentBalance > 0 ? "text-amber-600" : "text-foreground"}`}>
-                  {formatCurrency(customer.currentBalance)}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-4">
-              <div className={`flex items-center justify-center w-12 h-12 rounded-full ${isHighRisk ? "bg-red-500/10" : "bg-indigo-500/10"}`}>
-                {isHighRisk ? (
-                  <AlertTriangle className="w-6 h-6 text-red-500" />
-                ) : (
-                  <CreditCard className="w-6 h-6 text-indigo-500" />
-                )}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm text-muted-foreground">Credit Limit</p>
-                <p className="text-2xl font-bold tabular-nums">
-                  {formatCurrency(customer.creditLimit)}
-                </p>
-                {customer.creditLimit > 0 && (
-                  <div className="mt-2">
-                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all ${creditUsagePercent > 80 ? "bg-red-500" : creditUsagePercent > 50 ? "bg-amber-500" : "bg-emerald-500"}`}
-                        style={{ width: `${creditUsagePercent}%` }}
-                      />
-                    </div>
-                    <p className="text-[10px] text-muted-foreground mt-1">{creditUsagePercent.toFixed(0)}% used</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          <Card className="border-red-100">
+            <CardHeader>
+              <CardTitle className="text-red-600 text-lg">Danger Zone</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" className="w-full">
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete Account
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This action cannot be undone. This will anonymize your personal data and remove your access to this account.
+                      Past order records will be kept for financial reporting.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => deleteMutation.mutate()} className="bg-red-600 hover:bg-red-700">
+                      Yes, Delete My Account
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Main Content / Orders */}
+        <div className="md:col-span-2">
+          <Tabs defaultValue="orders">
+            <TabsList className="w-full">
+              <TabsTrigger value="orders" className="flex-1">Order History</TabsTrigger>
+              {/* <TabsTrigger value="settings" className="flex-1">Settings</TabsTrigger> */}
+            </TabsList>
+
+            <TabsContent value="orders" className="mt-4">
+              {orders?.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 rounded-lg">
+                  <ShoppingBag className="h-12 w-12 mx-auto text-slate-300 mb-2" />
+                  <h3 className="text-lg font-medium text-slate-600">No orders yet</h3>
+                  <Button variant="ghost" onClick={() => setLocation('/lunch-menu')}>Start Ordering</Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {orders?.map((order: any) => (
+                    <Card key={order.id} className="overflow-hidden">
+                      <div className="bg-slate-50 px-4 py-3 border-b flex justify-between items-center">
+                        <div className="text-sm font-medium text-slate-600">
+                          {new Date(order.timestamp).toLocaleDateString()} at {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                        <div className={`text-xs font-bold px-2 py-1 rounded-full uppercase
+                                        ${order.status === 'completed' ? 'bg-green-100 text-green-700' :
+                            order.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                              'bg-blue-100 text-blue-700'}`}>
+                          {order.status}
+                        </div>
+                      </div>
+                      <CardContent className="p-4 grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Items</p>
+                          <div className="text-sm font-medium">
+                            {/* Order items not joined here for MVP simplicity, assume summary or fetch detail? 
+                                                Actually route returns sales record. We usually don't join items in list view unless queried.
+                                                Let's just show Total for now.
+                                            */}
+                            Order #{order.id.slice(0, 8)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Total</p>
+                          <div className="text-lg font-bold text-orange-600">
+                            {order.total.toLocaleString()} ฿
+                          </div>
+                        </div>
+                        {order.deliveryAddress && (
+                          <div className="col-span-2 text-xs text-slate-500 border-t pt-2 mt-1">
+                            <MapPin className="inline h-3 w-3 mr-1" />
+                            {order.deliveryAddress}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
-
-      {/* Credit Ledger Table */}
-      <Card>
-        <CardHeader className="p-3 md:p-4">
-          <CardTitle className="text-base md:text-lg font-medium flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-indigo-500" />
-            Credit Ledger ({ledgerEntries?.length || 0} transactions)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {ledgerLoading ? (
-            <div className="p-4 space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : ledgerEntries && ledgerEntries.length > 0 ? (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="pl-4">Date</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="pr-4 text-right">Running Balance</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {ledgerEntries.map((entry, index) => {
-                    const kind = (entry as any).transactionType || entry.type;
-                    const isCharge = kind === "sale";
-                    return (
-                      <TableRow key={entry.id || index} data-testid={`row-ledger-${index}`}>
-                        <TableCell className="pl-4 text-xs text-muted-foreground">
-                          {formatDate(entry.timestamp)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={isCharge ? "secondary" : "default"}
-                            className="gap-1 text-[10px]"
-                          >
-                            {isCharge ? (
-                              <ArrowUpRight className="w-3 h-3" />
-                            ) : (
-                              <ArrowDownRight className="w-3 h-3" />
-                            )}
-                            {isCharge ? "Sale" : "Repayment"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {entry.description || (isCharge ? "Credit sale" : "Repayment")}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className={`font-bold tabular-nums ${isCharge ? "text-amber-600" : "text-emerald-600"}`}>
-                            {isCharge ? "+" : "-"}{formatCurrency(Math.abs(entry.amount))}
-                          </span>
-                        </TableCell>
-                        <TableCell className="pr-4 text-right text-sm tabular-nums">
-                          {formatCurrency(entry.balanceAfter)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-muted mb-3">
-                <CreditCard className="w-6 h-6 text-muted-foreground" />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                No credit transactions yet
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }

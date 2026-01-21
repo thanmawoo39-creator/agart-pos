@@ -22,12 +22,12 @@ export function getImageUrl(url: string | null | undefined): string | null {
     console.log('🖼️ No URL provided, returning null');
     return null;
   }
-  
+
   if (url.startsWith('http')) {
     console.log('🖼️ URL is already full HTTP URL:', url);
     return url;
   }
-  
+
   const finalUrl = `${API_BASE_URL}${url.startsWith('/') ? url : '/' + url}`;
   console.log('🖼️ Constructed full URL:', finalUrl);
   return finalUrl;
@@ -58,18 +58,18 @@ export interface CurrencySettings {
   currencyPosition: 'before' | 'after';
 }
 
-// Default currency settings (Myanmar Kyat)
+// Default currency settings (Thai Baht)
 export const DEFAULT_CURRENCY: CurrencySettings = {
-  currencyCode: 'MMK',
-  currencySymbol: 'K',
-  currencyPosition: 'after'
+  currencyCode: 'THB',
+  currencySymbol: '฿',
+  currencyPosition: 'before'
 };
 
 // Common currencies with their configurations
 export const CURRENCIES = [
+  { code: 'THB', symbol: '฿', name: 'Thai Baht (฿)', position: 'before' as const, example: '฿1,000' },
   { code: 'MMK', symbol: 'K', name: 'Myanmar Kyat (K)', position: 'after' as const, example: '1,000 K' },
   { code: 'USD', symbol: '$', name: 'US Dollar ($)', position: 'before' as const, example: '$1,000' },
-  { code: 'THB', symbol: '฿', name: 'Thai Baht (฿)', position: 'before' as const, example: '฿1,000' },
   { code: 'SGD', symbol: 'S$', name: 'Singapore Dollar (S$)', position: 'before' as const, example: 'S$1,000' },
   { code: 'EUR', symbol: '€', name: 'Euro (€)', position: 'before' as const, example: '€1,000' },
   { code: 'GBP', symbol: '£', name: 'British Pound (£)', position: 'before' as const, example: '£1,000' },

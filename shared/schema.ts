@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
-import { createInsertSchema } from "drizzle-zod";
+import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { relations, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -9,19 +9,26 @@ import { z } from "zod";
 export const products = sqliteTable("products", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
+  translatedName: text("translated_name"), // Auto-translated Burmese name via Gemini AI
   price: real("price").notNull(),
   cost: real("cost").default(0),
   barcode: text("barcode").unique(),
   imageData: text("image_data"),
   imageUrl: text("image_url"),
   stock: integer("stock").notNull().default(0),
+  specialStock: integer("special_stock").notNull().default(0), // Dedicated stock for daily specials
   minStockLevel: integer("min_stock_level").notNull().default(0),
   unit: text("unit").notNull().default("pcs"),
   category: text("category"),
   status: text("status").notNull().default("active"),
+  isDailySpecial: integer("is_daily_special", { mode: "boolean" }).notNull().default(false),
+  isStandardMenu: integer("is_standard_menu", { mode: "boolean" }).notNull().default(false),
+  isShared: integer("is_shared", { mode: "boolean" }).notNull().default(false),
   businessUnitId: text("business_unit_id").references(() => businessUnits.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+  // Optimistic locking for concurrent inventory updates
+  version: integer("version").notNull().default(1),
 });
 
 // Customers
@@ -42,6 +49,9 @@ export const customers = sqliteTable("customers", {
   loyaltyPoints: integer("loyalty_points").notNull().default(0),
   riskTag: text("risk_tag", { enum: ["low", "high"] }).notNull().default("low"),
   businessUnitId: text("business_unit_id").references(() => businessUnits.id),
+  // originUnit tracks where the customer was originally created (for segmentation)
+  // Restaurant customers (originUnit='2') should be separate from Grocery customers
+  originUnit: text("origin_unit").references(() => businessUnits.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
@@ -51,9 +61,11 @@ export const staff = sqliteTable("staff", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   pin: text("pin").notNull(),
-  role: text("role", { enum: ["owner", "manager", "cashier", "kitchen"] }).notNull(),
+  password: text("password"), // For owner/admin authentication (nullable - cashiers use PIN only)
+  role: text("role", { enum: ["owner", "manager", "cashier", "waiter", "kitchen", "customer"] }).notNull(),
   barcode: text("barcode").unique(),
-  status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+  status: text("status", { enum: ["active", "suspended", "deleted"] }).notNull().default("active"),
+  isGuest: integer("is_guest", { mode: "boolean" }).notNull().default(false), // Guest user flag
   businessUnitId: text("business_unit_id").references(() => businessUnits.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -100,7 +112,20 @@ export const businessUnitSchema = z.object({
 export type BusinessUnit = z.infer<typeof businessUnitSchema>;
 export type InsertBusinessUnit = Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">;
 
-// Restaurant Tables
+// Restaurant Tables (for QR Menu Management)
+export const restaurantTables = sqliteTable("restaurant_tables", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  tableNumber: text("table_number").notNull().unique(),
+  tableName: text("table_name"),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export type RestaurantTable = typeof restaurantTables.$inferSelect;
+export type InsertRestaurantTable = typeof restaurantTables.$inferInsert;
+
+// Restaurant Tables (Old schema - for complex table management)
 export const tables = sqliteTable("tables", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   number: text("number").notNull(),
@@ -125,8 +150,14 @@ export const kitchenTickets = sqliteTable("kitchen_tickets", {
   tableNumber: text("table_number"),
   items: text("items"), // JSON string
   status: text("status", { enum: ["in_preparation", "ready", "served", "cancelled"] }).notNull().default("in_preparation"),
+  // Kanban workflow timestamps
+  startedAt: text("started_at"), // When chef clicks "Accept & Cook"
+  readyAt: text("ready_at"),     // When chef clicks "Mark Ready"
+  servedAt: text("served_at"),   // When chef clicks "Mark Served"
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+  // Optimistic locking for concurrent access (multi-waiter/kitchen)
+  version: integer("version").notNull().default(1),
 });
 
 // Sales
@@ -136,9 +167,25 @@ export const sales = sqliteTable("sales", {
   discount: real("discount").notNull().default(0),
   tax: real("tax").notNull(),
   total: real("total").notNull(),
+  status: text("status").notNull().default("pending"),
   paymentMethod: text("payment_method", { enum: ["cash", "card", "credit", "mobile"] }).notNull(),
-  paymentStatus: text("payment_status", { enum: ["paid", "unpaid"] }).notNull().default("paid"),
+  // Payment tracking
+  paymentStatus: text("payment_status", {
+    enum: ['unpaid', 'pending_verification', 'paid']
+  }).default('paid').notNull(),
+
+  // Order source tracking
+  orderSource: text("order_source", {
+    enum: ['qr', 'pos', 'delivery']
+  }).default('pos').notNull(),
+  orderType: text("order_type", { enum: ["dine-in", "delivery", "takeout"] }).notNull().default("dine-in"),
+  tableNumber: text("table_number"),
   customerId: text("customer_id").references(() => customers.id),
+  customerName: text("customer_name"),
+  customerPhone: text("customer_phone"),
+  deliveryAddress: text("delivery_address"),
+  requestedDeliveryTime: text("requested_delivery_time"),
+  paymentProofUrl: text("payment_proof_url"),
   storeId: text("store_id"),
   businessUnitId: text("business_unit_id").notNull().references(() => businessUnits.id),
   staffId: text("staff_id"),
@@ -146,6 +193,15 @@ export const sales = sqliteTable("sales", {
   paymentSlipUrl: text("payment_slip_url"),
   timestamp: text("timestamp").notNull(),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  // Driver GPS tracking
+  driverLat: real("driver_lat"),
+  driverLng: real("driver_lng"),
+  locationUpdatedAt: text("location_updated_at"),
+  // Guest ordering support
+  phoneVerified: integer("phone_verified", { mode: "boolean" }).default(false),
+  guestId: text("guest_id"),
+  // Optimistic locking for concurrent access (multi-cashier)
+  version: integer("version").notNull().default(1),
 });
 
 // Sale Items (for detailed tracking)
@@ -222,6 +278,31 @@ export const expenses = sqliteTable("expenses", {
   timestamp: text("timestamp").notNull(),
 });
 
+// Payment Buffers - Stores SMS payments temporarily for verification
+export const paymentBuffers = sqliteTable("payment_buffers", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  amount: real("amount").notNull(),
+  transactionId: text("transaction_id"),
+  senderName: text("sender_name"),
+  smsContent: text("sms_content"),
+  verified: integer("verified", { mode: "boolean" }).default(false).notNull(),
+  verifiedAt: text("verified_at"),
+  orderId: text("order_id"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// SMS Logs - Stores ALL incoming SMS for audit history
+export const smsLogs = sqliteTable("sms_logs", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sender: text("sender"),
+  messageContent: text("message_content"),
+  extractedAmount: real("extracted_amount"),
+  status: text("status", { enum: ["received", "matched", "unmatched", "failed"] }).default("received").notNull(),
+  matchedOrderId: text("matched_order_id"),
+  bufferRecordId: text("buffer_record_id"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
 // App Settings
 export const appSettings = sqliteTable("app_settings", {
   id: integer("id").primaryKey().default(1),
@@ -240,9 +321,10 @@ export const appSettings = sqliteTable("app_settings", {
   groqApiKey: text("groq_api_key"),
   enableMobileScanner: integer("enable_mobile_scanner", { mode: "boolean" }).notNull().default(true),
   enablePhotoCapture: integer("enable_photo_capture", { mode: "boolean" }).notNull().default(true),
-  currencyCode: text("currency_code").notNull().default("MMK"),
-  currencySymbol: text("currency_symbol").notNull().default("K"),
-  currencyPosition: text("currency_position", { enum: ["before", "after"] }).notNull().default("after"),
+  currencyCode: text("currency_code").notNull().default("THB"),
+  currencySymbol: text("currency_symbol").notNull().default("฿"),
+  currencyPosition: text("currency_position", { enum: ["before", "after"] }).notNull().default("before"),
+  riderPin: text("delivery_rider_pin").default("8888"),
   updatedAt: text("updated_at"),
 });
 
@@ -277,6 +359,8 @@ export const shifts = sqliteTable("shifts", {
   creditSales: real("credit_sales").notNull().default(0),
   mobileSales: real("mobile_sales").notNull().default(0),
   createdAt: text("created_at").notNull(),
+  // Optimistic locking for concurrent shift close attempts
+  version: integer("version").notNull().default(1),
 });
 
 // --- Relations ---
@@ -298,6 +382,7 @@ export const saleItemsRelations = relations(saleItems, ({ one }) => ({
 export const productSchema = z.object({
   id: z.string(),
   name: z.string().min(1, "Product name is required"),
+  translatedName: z.string().nullable().optional(), // Auto-translated Burmese name
   price: z.number().positive("Price must be greater than 0"),
   cost: z.number().min(0).nullable().optional(), // Cost price for profit margin calculation
   barcode: z.string().nullable().optional(), // Optional - will be auto-generated if not provided
@@ -310,11 +395,19 @@ export const productSchema = z.object({
   unit: z.string().default("pcs"), // pcs, bag, box, kg, etc.
   category: z.string().nullable().optional().default(null), // Optional - defaults to null
   status: z.string().optional().default("active"), // active or archived - optional for inserts
+  isDailySpecial: z.boolean().default(false), // For public lunch menu - featured items
+  isStandardMenu: z.boolean().default(false), // For public lunch menu - regular add-ons
   businessUnitId: z.string().nullable().optional(),
 });
 
 export type Product = z.infer<typeof productSchema>;
-export type InsertProduct = Omit<Product, "id" | "status"> & { status?: string; businessUnitId?: string }; // Make status and businessUnitId optional for inserts
+// InsertProduct omits 'id' and makes 'status', 'businessUnitId', 'isDailySpecial', 'isStandardMenu' optional for inserts
+export type InsertProduct = Omit<Product, "id" | "status" | "isDailySpecial" | "isStandardMenu"> & {
+  status?: string;
+  businessUnitId?: string;
+  isDailySpecial?: boolean;
+  isStandardMenu?: boolean;
+};
 
 // Inventory log schema for audit trail
 export const inventoryLogTypeSchema = z.enum(["stock-in", "sale", "adjustment"]);
@@ -347,14 +440,18 @@ export const customerSchema = z.object({
   memberId: z.string().optional().nullable(), // Customer member ID (e.g., "C-001")
   imageUrl: z.string().optional().nullable(), // Removed URL validation to allow empty strings
   status: z.string().default("active"),
-  creditLimit: z.number().min(0).default(0),
-  currentBalance: z.number().default(0),
+  creditLimit: z.coerce.number().min(0).default(0),
+  currentBalance: z.coerce.number().default(0),
   dueDate: z.string().optional().nullable(),
   creditDueDate: z.string().optional().nullable(),
-  monthlyClosingDay: z.number().int().min(1).max(31).optional().nullable(),
-  loyaltyPoints: z.number().int().min(0).default(0),
+  monthlyClosingDay: z.coerce.number().int().min(1).max(31).optional().nullable(),
+  loyaltyPoints: z.coerce.number().int().min(0).default(0),
   riskTag: z.enum(["low", "high"]).default("low"),
   businessUnitId: z.string().nullable().optional(),
+  // originUnit tracks where the customer was originally created (for segmentation)
+  originUnit: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
 });
 
 export type Customer = z.infer<typeof customerSchema>;
@@ -371,6 +468,10 @@ export const saleItemSchema = z.object({
 
 export type SaleItem = z.infer<typeof saleItemSchema>;
 
+// Order type schema
+export const orderTypeSchema = z.enum(["dine-in", "delivery", "takeout"]);
+export type OrderType = z.infer<typeof orderTypeSchema>;
+
 // Sale schema
 export const saleSchema = z.object({
   id: z.string(),
@@ -379,15 +480,23 @@ export const saleSchema = z.object({
   discount: z.number().min(0).default(0),
   tax: z.number().min(0),
   total: z.number().positive(),
+  status: z.string().optional().default("pending"),
   paymentMethod: z.enum(["cash", "card", "credit", "mobile"]),
-  paymentStatus: z.enum(["paid", "unpaid"]).default("paid"),
+  paymentStatus: z.enum(["paid", "unpaid", "pending_verification"]).default("paid"),
+  orderType: orderTypeSchema.default("dine-in"),
   customerId: z.string().optional(),
+  customerName: z.string().optional(),
+  customerPhone: z.string().optional(),
+  deliveryAddress: z.string().optional(),
+  requestedDeliveryTime: z.string().optional(),
+  paymentProofUrl: z.string().optional(),
   storeId: z.string().optional(),
   businessUnitId: z.string(),
   staffId: z.string().optional(),
   timestamp: z.string(),
   createdBy: z.string().optional(),
   paymentSlipUrl: z.string().optional(),
+  tableNumber: z.string().optional().nullable(),
 });
 
 export type Sale = z.infer<typeof saleSchema>;
@@ -419,8 +528,12 @@ export const kitchenTicketSchema = z.object({
   tableNumber: z.string().nullable().optional(),
   items: z.string().nullable().optional(),
   status: kitchenTicketStatusSchema,
+  startedAt: z.string().nullable().optional(), // Kanban: When cooking started
+  readyAt: z.string().nullable().optional(),    // Kanban: When marked ready
+  servedAt: z.string().nullable().optional(),   // Kanban: When marked served
   createdAt: z.string(),
   updatedAt: z.string(),
+  version: z.number().int().default(1), // Optimistic locking
 });
 
 export type KitchenTicket = z.infer<typeof kitchenTicketSchema>;
@@ -435,7 +548,7 @@ export interface EnrichedCreditLedger extends CreditLedger {
 }
 
 // Staff schema with roles
-export const staffRoleSchema = z.enum(["owner", "manager", "cashier", "kitchen"]);
+export const staffRoleSchema = z.enum(["owner", "manager", "cashier", "waiter", "kitchen"]);
 export type StaffRole = z.infer<typeof staffRoleSchema>;
 
 export const staffStatusSchema = z.enum(["active", "suspended"]);
@@ -598,9 +711,10 @@ export const appSettingsSchema = z.object({
   groqApiKey: z.string().nullable(),
   enableMobileScanner: z.boolean().default(true),
   enablePhotoCapture: z.boolean().default(true),
-  currencyCode: z.string().default("MMK"),
-  currencySymbol: z.string().default("K"),
-  currencyPosition: currencyPositionSchema.default("after"),
+  currencyCode: z.string().default("THB"),
+  currencySymbol: z.string().default("฿"),
+  currencyPosition: currencyPositionSchema.default("before"),
+  riderPin: z.string().default("8888"),
   updatedAt: z.string().nullable(),
 });
 
@@ -626,6 +740,7 @@ export const shiftSchema = z.object({
   cardSales: z.number().min(0).default(0),
   creditSales: z.number().min(0).default(0),
   createdAt: z.string(),
+  version: z.number().int().default(1), // Optimistic locking
 });
 
 export type Shift = z.infer<typeof shiftSchema>;
@@ -650,3 +765,127 @@ export const alertSchema = z.object({
 
 export type Alert = z.infer<typeof alertSchema>;
 export type InsertAlert = Omit<Alert, "id" | "createdAt">;
+
+// Public Order schema for online ordering (lunch menu)
+export const publicOrderItemSchema = z.object({
+  productId: z.string(),
+  productName: z.string(),
+  quantity: z.number().int().positive(),
+  unitPrice: z.number().positive(),
+  total: z.number().positive(),
+});
+
+export type PublicOrderItem = z.infer<typeof publicOrderItemSchema>;
+
+export const publicOrderSchema = z.object({
+  customerName: z.string().min(1, "Customer name is required"),
+  customerPhone: z.string().optional(), // Optional for dine-in orders
+  deliveryAddress: z.string().optional(), // Optional for dine-in orders
+  items: z.array(publicOrderItemSchema).min(1, "At least one item is required"),
+  paymentProofUrl: z.string().optional(),
+  businessUnitId: z.string(),
+  orderType: z.enum(["dine-in", "delivery", "takeout"]).optional().default("delivery"),
+  tableNumber: z.string().optional(), // Table number for dine-in orders
+});
+
+export type PublicOrder = z.infer<typeof publicOrderSchema>;
+
+// --- Catering Module Schema ---
+
+export const cateringOrders = sqliteTable("catering_orders", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  customerName: text("customer_name").notNull(),
+  customerPhone: text("customer_phone").notNull(),
+  deliveryDate: text("delivery_date").notNull(), // ISO Timestamp
+  deliveryAddress: text("delivery_address"),
+  totalAmount: integer("total_amount"),
+  depositPaid: integer("deposit_paid").default(0),
+  status: text("status", { enum: ['draft', 'confirmed', 'cooking', 'ready', 'out_for_delivery', 'delivered', 'cancelled'] }).default('confirmed'),
+  createdByUserId: integer("created_by_user_id"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  // Driver GPS tracking
+  driverLat: real("driver_lat"),
+  driverLng: real("driver_lng"),
+  locationUpdatedAt: text("location_updated_at"),
+  // Proof of Delivery
+  proofImageUrl: text("proof_image_url"),
+  paymentSlipUrl: text("payment_slip_url"),
+});
+
+export const cateringItems = sqliteTable("catering_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cateringOrderId: integer("catering_order_id").references(() => cateringOrders.id),
+  itemName: text("item_name"),
+  quantity: integer("quantity").notNull(),
+  unitPrice: integer("unit_price"),
+  totalPrice: integer("total_price"),
+  isAddon: integer("is_addon", { mode: "boolean" }).default(false),
+});
+
+// --- Feedback Module ---
+export const feedback = sqliteTable("feedback", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  orderId: text("order_id").notNull().references(() => sales.id),
+  rating: integer("rating").notNull(), // 1-5
+  comment: text("comment"),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export const feedbackRelations = relations(feedback, ({ one }) => ({
+  customer: one(customers, {
+    fields: [feedback.customerId],
+    references: [customers.id],
+  }),
+  order: one(sales, {
+    fields: [feedback.orderId],
+    references: [sales.id],
+  }),
+}));
+
+export const feedbackSchema = z.object({
+  id: z.string(),
+  customerId: z.string(),
+  orderId: z.string(),
+  rating: z.number().min(1).max(5),
+  comment: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+
+export type Feedback = z.infer<typeof feedbackSchema>;
+export type InsertFeedback = Omit<Feedback, "id" | "createdAt">;
+
+// Relations
+export const cateringOrdersRelations = relations(cateringOrders, ({ many }) => ({
+  items: many(cateringItems),
+}));
+
+export const cateringItemsRelations = relations(cateringItems, ({ one }) => ({
+  order: one(cateringOrders, {
+    fields: [cateringItems.cateringOrderId],
+    references: [cateringOrders.id],
+  }),
+}));
+
+export const cateringProducts = sqliteTable("catering_products", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  key: text("key").notNull().unique(), // e.g. "standard_set"
+  label: text("label").notNull(),      // e.g. "Standard Set (Rice+Curry)"
+  price: integer("price").notNull(),   // e.g. 60
+  isActive: integer("is_active", { mode: "boolean" }).default(true),
+  isShared: integer("is_shared", { mode: "boolean" }).default(false),
+});
+
+export const insertCateringProductSchema = createInsertSchema(cateringProducts);
+export const selectCateringProductSchema = createSelectSchema(cateringProducts);
+
+// Schemas & Types
+export const insertCateringOrderSchema = createInsertSchema(cateringOrders);
+export const selectCateringOrderSchema = createInsertSchema(cateringOrders);
+export type InsertCateringOrder = typeof cateringOrders.$inferInsert;
+export type SelectCateringOrder = typeof cateringOrders.$inferSelect;
+
+export const insertCateringItemSchema = createInsertSchema(cateringItems);
+export const selectCateringItemSchema = createInsertSchema(cateringItems);
+export type InsertCateringItem = typeof cateringItems.$inferInsert;
+export type SelectCateringItem = typeof cateringItems.$inferSelect;

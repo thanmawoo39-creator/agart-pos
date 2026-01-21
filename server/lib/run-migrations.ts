@@ -88,6 +88,16 @@ export async function runMigrations() {
       console.log("✅ mobile_payment_qr_url column already exists in app_settings");
     }
 
+    // Check if app_settings has delivery_rider_pin
+    const deliveryPinColumnExists = columnNames.includes('delivery_rider_pin');
+    if (!deliveryPinColumnExists) {
+      console.log("Adding delivery_rider_pin column to app_settings table...");
+      await runSql("ALTER TABLE app_settings ADD COLUMN delivery_rider_pin TEXT DEFAULT '8888'");
+      console.log("✅ Added delivery_rider_pin column");
+    } else {
+      console.log("✅ delivery_rider_pin column already exists in app_settings");
+    }
+
     // Ensure business_unit_id columns exist on core tables (older DBs may be missing them)
     const ensureColumn = async (table: string, column: string, alterSql: any) => {
       const info = await db.all(sql.raw(`PRAGMA table_info(${table})`));
@@ -100,7 +110,15 @@ export async function runMigrations() {
     };
 
     await ensureColumn('products', 'business_unit_id', sql`ALTER TABLE products ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+    await ensureColumn('products', 'translated_name', sql`ALTER TABLE products ADD COLUMN translated_name TEXT`);
     await ensureColumn('sales', 'business_unit_id', sql`ALTER TABLE sales ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
+    await ensureColumn('sales', 'status', sql`ALTER TABLE sales ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`);
+    await ensureColumn('sales', 'order_type', sql`ALTER TABLE sales ADD COLUMN order_type TEXT NOT NULL DEFAULT 'dine-in'`);
+    await ensureColumn('sales', 'customer_name', sql`ALTER TABLE sales ADD COLUMN customer_name TEXT`);
+    await ensureColumn('sales', 'customer_phone', sql`ALTER TABLE sales ADD COLUMN customer_phone TEXT`);
+    await ensureColumn('sales', 'delivery_address', sql`ALTER TABLE sales ADD COLUMN delivery_address TEXT`);
+    await ensureColumn('sales', 'payment_proof_url', sql`ALTER TABLE sales ADD COLUMN payment_proof_url TEXT`);
+    await ensureColumn('sales', 'requested_delivery_time', sql`ALTER TABLE sales ADD COLUMN requested_delivery_time TEXT`);
     await ensureColumn('customers', 'business_unit_id', sql`ALTER TABLE customers ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
     await ensureColumn('staff', 'business_unit_id', sql`ALTER TABLE staff ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);
     await ensureColumn('attendance', 'business_unit_id', sql`ALTER TABLE attendance ADD COLUMN business_unit_id TEXT NOT NULL DEFAULT '1'`);

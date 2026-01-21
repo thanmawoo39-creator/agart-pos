@@ -7,7 +7,6 @@ import type {
   InsertKitchenTicket,
   KitchenTicketStatus,
   CurrentShift,
-  SaleItem,
   InsertSale,
   InsertCreditLedger,
   Attendance,
@@ -26,8 +25,12 @@ import type {
   InsertCustomer,
   Staff,
   InsertStaff,
-  EnrichedCreditLedger,
   BusinessUnit,
+  Table,
+  ExpenseCategory,
+  CartItem,
+  Feedback,
+  InsertFeedback,
 } from "../shared/schema";
 import {
   products,
@@ -45,11 +48,12 @@ import {
   tables,
   businessUnits,
   kitchenTickets,
+  feedback,
 } from "../shared/schema";
 
 import crypto from "crypto";
-import { db } from "./lib/db";
-import { eq, desc, and, or, isNull, gte, lte, sql, sum, count } from "drizzle-orm";
+import { db, sqlite } from "./lib/db";
+import { eq, desc, and, or, isNull, gte, lte, sql, sum, count, ne, not, like, inArray } from "drizzle-orm";
 import { hashPin, verifyPin } from './lib/auth';
 
 export interface IStorage {
@@ -122,26 +126,26 @@ export interface IStorage {
   updateExpense(id: string, updates: Partial<InsertExpense>): Promise<Expense | null | undefined>;
   deleteExpense(id: string): Promise<boolean>;
   getExpensesByDateRange(startDate: string, endDate: string): Promise<Expense[]>;
-  getExpensesByCategory(category: string): Promise<Expense[]>;
+  getExpensesByCategory(category: ExpenseCategory): Promise<Expense[]>;
 
   // Dashboard
   getDashboardSummary(): Promise<DashboardSummary>;
 
   // Tables
-  getTables(): Promise<any[]>;
-  updateTableStatus(tableId: string, status: 'available' | 'occupied' | 'reserved'): Promise<any | null | undefined>;
-  updateTableOrder(tableId: string, currentOrder: string | null): Promise<any | null | undefined>;
-  updateTableServiceStatus(tableId: string, serviceStatus: 'ordered' | 'served' | 'billing' | null): Promise<any | null | undefined>;
+  getTables(): Promise<Table[]>;
+  updateTableStatus(tableId: string, status: 'available' | 'occupied' | 'reserved'): Promise<Table | null | undefined>;
+  updateTableOrder(tableId: string, currentOrder: string | null): Promise<Table | null | undefined>;
+  updateTableServiceStatus(tableId: string, serviceStatus: 'ordered' | 'served' | 'billing' | null): Promise<Table | null | undefined>;
   orderTableAndCreateKitchenTicket(input: {
     businessUnitId: string;
     tableId: string;
     tableNumber?: string | null;
-    cart: any[];
+    cart: CartItem[];
   }): Promise<{
-    table: any;
+    table: Table;
     ticket: KitchenTicket;
-    newItems: any[];
-    alreadyOrdered: any[];
+    newItems: CartItem[];
+    alreadyOrdered: CartItem[];
   }>;
 
   // Kitchen Tickets
@@ -157,8 +161,8 @@ export interface IStorage {
   // Business Units
   getBusinessUnits(): Promise<BusinessUnit[]>;
   getBusinessUnit(id: string): Promise<BusinessUnit | null | undefined>;
-  createBusinessUnit(businessUnit: any): Promise<BusinessUnit>;
-  updateBusinessUnit(id: string, updates: Partial<any>): Promise<BusinessUnit | null | undefined>;
+  createBusinessUnit(businessUnit: Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">): Promise<BusinessUnit>;
+  updateBusinessUnit(id: string, updates: Partial<Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">>): Promise<BusinessUnit | null | undefined>;
   deleteBusinessUnit(id: string): Promise<boolean>;
 
   // Analytics
@@ -182,6 +186,13 @@ export interface IStorage {
 
   // Initialize
   initialize(): Promise<void>;
+
+  updateSaleStatus(id: string, status: string): Promise<Sale>;
+  updateSaleLocation(id: string, lat: number, lng: number): Promise<boolean>;
+  updatePaymentStatus(id: string, paymentStatus: string): Promise<Sale>;
+
+  // Feedback
+  createFeedback(feedback: InsertFeedback): Promise<Feedback>;
 }
 
 export class POSStorage implements IStorage {
@@ -206,6 +217,8 @@ export class POSStorage implements IStorage {
       imageUrl: product.imageUrl || null,
       cost: product.cost ?? null,
       status: 'active', // Always create as active
+      isDailySpecial: product.isDailySpecial ?? false, // Daily special flag for lunch menu
+      isStandardMenu: product.isStandardMenu ?? false, // Standard menu flag for add-ons
       businessUnitId: product.businessUnitId || null, // Include business unit
     };
 
@@ -280,10 +293,18 @@ export class POSStorage implements IStorage {
       ...sale,
       items: sale.items.map(item => ({ ...item, productId: item.productId, productName: item.productName, quantity: item.quantity, unitPrice: item.unitPrice, total: item.total })),
       customerId: sale.customerId ?? undefined,
+      customerName: sale.customerName ?? undefined,
+      customerPhone: sale.customerPhone ?? undefined,
+      deliveryAddress: sale.deliveryAddress ?? undefined,
+      paymentProofUrl: sale.paymentProofUrl ?? undefined,
+      orderType: (sale.orderType as any) ?? 'dine-in',
       storeId: sale.storeId ?? undefined,
+      businessUnitId: (sale.businessUnitId as any) ?? undefined,
       staffId: sale.staffId ?? undefined,
       createdBy: sale.createdBy ?? undefined,
       paymentSlipUrl: sale.paymentSlipUrl ?? undefined,
+      requestedDeliveryTime: sale.requestedDeliveryTime ?? undefined,
+      paymentStatus: (sale.paymentStatus as any) ?? 'paid',
     }));
   }
 
@@ -301,11 +322,66 @@ export class POSStorage implements IStorage {
       ...sale,
       items: sale.items.map(item => ({ ...item, productId: item.productId, productName: item.productName, quantity: item.quantity, unitPrice: item.unitPrice, total: item.total })),
       customerId: sale.customerId ?? undefined,
+      customerName: sale.customerName ?? undefined,
+      customerPhone: sale.customerPhone ?? undefined,
+      deliveryAddress: sale.deliveryAddress ?? undefined,
+      paymentProofUrl: sale.paymentProofUrl ?? undefined,
+      orderType: (sale.orderType as any) ?? 'dine-in',
       storeId: sale.storeId ?? undefined,
+      businessUnitId: (sale.businessUnitId as any) ?? undefined, // Ensure businessUnitId is handled
       staffId: sale.staffId ?? undefined,
       createdBy: sale.createdBy ?? undefined,
       paymentSlipUrl: sale.paymentSlipUrl ?? undefined,
+      requestedDeliveryTime: sale.requestedDeliveryTime ?? undefined, // Added mapped field
+      paymentStatus: (sale.paymentStatus as any) ?? 'paid', // Cast to any to handle pending_verification mismatch if schema update didn't propagate fully
     };
+  }
+
+  async updateSaleStatus(id: string, status: string): Promise<Sale> {
+    // Update ONLY the sale status - payment status is handled separately via updatePaymentStatus
+    await db
+      .update(sales)
+      .set({ status })
+      .where(eq(sales.id, id));
+
+    // Re-fetch the complete sale with items to return proper data
+    const updatedSale = await this.getSale(id);
+
+    if (!updatedSale) {
+      throw new Error(`Sale not found after update: ${id}`);
+    }
+
+    return updatedSale;
+  }
+
+  async updateSaleLocation(id: string, lat: number, lng: number): Promise<boolean> {
+    const result = await db
+      .update(sales)
+      .set({
+        driverLat: lat,
+        driverLng: lng,
+        locationUpdatedAt: new Date().toISOString()
+      })
+      .where(eq(sales.id, id));
+
+    return result.changes > 0;
+  }
+
+  async updatePaymentStatus(id: string, paymentStatus: string): Promise<Sale> {
+    // Update only the payment status (for manual verification)
+    await db
+      .update(sales)
+      .set({ paymentStatus: paymentStatus as any })
+      .where(eq(sales.id, id));
+
+    // Re-fetch the complete sale with items to return proper data
+    const updatedSale = await this.getSale(id);
+
+    if (!updatedSale) {
+      throw new Error(`Sale not found after update: ${id}`);
+    }
+
+    return updatedSale;
   }
 
   createSale(insertSale: InsertSale): Sale {
@@ -320,9 +396,18 @@ export class POSStorage implements IStorage {
         if (!product) {
           throw new Error(`Product not found: ID ${item.productId}`);
         }
-        if (product.stock < item.quantity) {
-          throw new Error(`Insufficient stock for ${product.name}. Requested: ${item.quantity}, Available: ${product.stock}`);
+
+        // Logic split for Specials vs Regular
+        if (product.isDailySpecial) {
+          if (product.specialStock < item.quantity) {
+            throw new Error(`Insufficient Special Stock for ${product.name}. Requested: ${item.quantity}, Available: ${product.specialStock}`);
+          }
+        } else {
+          if (product.stock < item.quantity) {
+            throw new Error(`Insufficient stock for ${product.name}. Requested: ${item.quantity}, Available: ${product.stock}`);
+          }
         }
+
         productCache.set(item.productId, product);
         calculatedTotal += (item.unitPrice * item.quantity);
       }
@@ -334,6 +419,11 @@ export class POSStorage implements IStorage {
         total: calculatedTotal,
         timestamp: new Date().toISOString(),
         businessUnitId: saleData.businessUnitId, // Include business unit (required)
+        orderType: saleData.orderType || 'dine-in',
+        customerName: saleData.customerName || null,
+        customerPhone: saleData.customerPhone || null,
+        deliveryAddress: saleData.deliveryAddress || null,
+        paymentProofUrl: saleData.paymentProofUrl || null,
       };
       const newSale = tx.insert(sales).values(saleToInsert).returning().get();
 
@@ -348,22 +438,49 @@ export class POSStorage implements IStorage {
           total: item.total
         }).run();
 
-        const product = productCache.get(item.productId);
-        if (product) {
-          tx.update(products)
-            .set({ stock: product.stock - item.quantity })
-            .where(eq(products.id, item.productId))
-            .run();
 
-          tx.insert(inventoryLogs).values({
-            productId: item.productId,
-            productName: product.name,
-            quantityChanged: -item.quantity,
-            previousStock: product.stock,
-            currentStock: product.stock - item.quantity,
-            type: 'sale',
-            timestamp: new Date().toISOString()
-          }).run();
+        const product = productCache.get(item.productId);
+
+        if (product) {
+
+          if (product.isDailySpecial) {
+            // Update Special Stock
+            const newSpecialStock = product.specialStock - item.quantity;
+            tx.update(products)
+              .set({
+                specialStock: newSpecialStock,
+                // Auto-unavailable if special stock hits 0
+                status: newSpecialStock <= 0 ? 'unavailable' : product.status
+              })
+              .where(eq(products.id, item.productId))
+              .run();
+
+            tx.insert(inventoryLogs).values({
+              productId: item.productId,
+              productName: product.name,
+              quantityChanged: -item.quantity,
+              previousStock: product.specialStock,
+              currentStock: newSpecialStock,
+              type: 'sale_special',
+              timestamp: new Date().toISOString()
+            }).run();
+          } else {
+            // Update Regular Stock
+            tx.update(products)
+              .set({ stock: product.stock - item.quantity })
+              .where(eq(products.id, item.productId))
+              .run();
+
+            tx.insert(inventoryLogs).values({
+              productId: item.productId,
+              productName: product.name,
+              quantityChanged: -item.quantity,
+              previousStock: product.stock,
+              currentStock: product.stock - item.quantity,
+              type: 'sale',
+              timestamp: new Date().toISOString()
+            }).run();
+          }
         }
       }
 
@@ -399,10 +516,14 @@ export class POSStorage implements IStorage {
     });
 
     return {
-      // ...
       ...saleResult,
       items: insertSale.items,
       customerId: saleResult.customerId ?? undefined,
+      customerName: saleResult.customerName ?? undefined,
+      customerPhone: saleResult.customerPhone ?? undefined,
+      deliveryAddress: saleResult.deliveryAddress ?? undefined,
+      paymentProofUrl: saleResult.paymentProofUrl ?? undefined,
+      orderType: (saleResult.orderType as any) ?? 'dine-in',
       storeId: saleResult.storeId ?? undefined,
       staffId: saleResult.staffId ?? undefined,
       createdBy: saleResult.createdBy ?? undefined,
@@ -421,9 +542,9 @@ export class POSStorage implements IStorage {
   }
 
   async createCreditLedgerEntry(entry: InsertCreditLedger): Promise<CreditLedger> {
-    const toInsert: any = {
-      ...(entry as any),
-      transactionType: (entry as any).transactionType ?? (entry as any).type,
+    const toInsert = {
+      ...entry,
+      transactionType: entry.transactionType ?? entry.type,
     };
     const [newEntry] = await db.insert(creditLedger).values(toInsert).returning();
     return {
@@ -440,7 +561,7 @@ export class POSStorage implements IStorage {
     createdBy?: string | null;
   }): Promise<{ customer: Customer; ledgerEntry: CreditLedger }> {
     const result = db.transaction((tx) => {
-      const customer = tx.select().from(customers).where(eq(customers.id, input.customerId)).get() as any;
+      const customer = tx.select().from(customers).where(eq(customers.id, input.customerId)).get();
       if (!customer) {
         throw new Error('Customer not found');
       }
@@ -462,25 +583,35 @@ export class POSStorage implements IStorage {
         balanceAfter: newBalance,
         description: input.description ?? 'Debt Repayment',
         timestamp: now,
-        createdAt: now,
         createdBy: input.createdBy ?? null,
-      } as any).returning().get() as any;
+      }).returning().get();
 
       const updatedCustomer = tx.update(customers)
-        .set({ currentBalance: newBalance, updatedAt: now } as any)
+        .set({ currentBalance: newBalance })
         .where(eq(customers.id, customer.id))
         .returning()
-        .get() as any;
+        .get();
 
-      return { customer: updatedCustomer, ledgerEntry: entry };
+      return {
+        customer: updatedCustomer as Customer,
+        ledgerEntry: {
+          ...entry,
+          saleId: entry.saleId || undefined,
+          voucherImageUrl: entry.voucherImageUrl || undefined,
+        } as CreditLedger
+      };
     });
 
-    return Promise.resolve(result as any);
+    return Promise.resolve(result);
   }
 
   // Staff
+  // Staff
   async getStaff(): Promise<Staff[]> {
-    return await db.select().from(staff);
+    // 'admin' is not in the schema, 'owner' covers it.
+    return await db.select().from(staff).where(
+      inArray(staff.role, ['owner', 'manager', 'cashier', 'waiter', 'kitchen'])
+    );
   }
 
   async getStaffMember(id: string): Promise<Staff | null | undefined> {
@@ -535,11 +666,11 @@ export class POSStorage implements IStorage {
   }
 
   async suspendStaff(id: string): Promise<Staff | null | undefined> {
-    return await this.updateStaff(id, { status: 'suspended' } as any);
+    return await this.updateStaff(id, { status: 'suspended' });
   }
 
   async activateStaff(id: string): Promise<Staff | null | undefined> {
-    return await this.updateStaff(id, { status: 'active' } as any);
+    return await this.updateStaff(id, { status: 'active' });
   }
 
   // Attendance
@@ -677,12 +808,26 @@ export class POSStorage implements IStorage {
     };
   }
 
+  async createFeedback(data: InsertFeedback): Promise<Feedback> {
+    const [newFeedback] = await db.insert(feedback).values(data).returning();
+    return {
+      ...newFeedback,
+      comment: newFeedback.comment || null
+    };
+  }
+
+
   async adjustStock(productId: string, quantityChanged: number, type: 'stock-in' | 'sale' | 'adjustment', staffId?: string, staffName?: string, reason?: string): Promise<{ product: Product; log: InventoryLog } | undefined> {
     const product = await this.getProduct(productId);
     if (!product) return undefined;
 
     const previousStock = product.stock || 0;
     const currentStock = previousStock + quantityChanged;
+
+    if (currentStock < 0) {
+      const requested = Math.abs(quantityChanged);
+      throw new Error(`Insufficient stock for ${product.name}. Requested: ${requested}, Available: ${previousStock}`);
+    }
 
     // Update product stock
     await this.updateProduct(productId, { stock: currentStock });
@@ -724,13 +869,13 @@ export class POSStorage implements IStorage {
       note: expense.note ?? null,
       timestamp: new Date().toISOString(),
     };
-    const [newExpense] = await db.insert(expenses).values(expenseData as any).returning();
+    const [newExpense] = await db.insert(expenses).values(expenseData).returning();
     return newExpense;
   }
 
   async updateExpense(id: string, updates: Partial<InsertExpense>): Promise<Expense | null | undefined> {
     const [updated] = await db.update(expenses)
-      .set(updates as any)
+      .set(updates)
       .where(eq(expenses.id, id))
       .returning();
     return updated;
@@ -748,8 +893,8 @@ export class POSStorage implements IStorage {
       .orderBy(desc(expenses.date));
   }
 
-  async getExpensesByCategory(category: string): Promise<Expense[]> {
-    return await db.select().from(expenses).where(eq(expenses.category, category as any));
+  async getExpensesByCategory(category: ExpenseCategory): Promise<Expense[]> {
+    return await db.select().from(expenses).where(eq(expenses.category, category));
   }
 
   // Dashboard
@@ -791,11 +936,11 @@ export class POSStorage implements IStorage {
   }
 
   // Tables
-  async getTables(): Promise<any[]> {
+  async getTables(): Promise<Table[]> {
     return await db.select().from(tables).orderBy(tables.number);
   }
 
-  async updateTableStatus(tableId: string, status: 'available' | 'occupied' | 'reserved'): Promise<any | null | undefined> {
+  async updateTableStatus(tableId: string, status: 'available' | 'occupied' | 'reserved'): Promise<Table | null | undefined> {
     const [updated] = await db
       .update(tables)
       .set({ status, updatedAt: new Date().toISOString() })
@@ -804,9 +949,9 @@ export class POSStorage implements IStorage {
     return updated;
   }
 
-  async updateTableOrder(tableId: string, currentOrder: string | null): Promise<any | null | undefined> {
+  async updateTableOrder(tableId: string, currentOrder: string | null): Promise<Table | null | undefined> {
     const now = new Date().toISOString();
-    const setData: any = { currentOrder, updatedAt: now };
+    const setData: Partial<Table> = { currentOrder, updatedAt: now };
     if (currentOrder === null) {
       setData.lastOrdered = null;
       setData.serviceStatus = null;
@@ -820,10 +965,10 @@ export class POSStorage implements IStorage {
     return updated;
   }
 
-  async updateTableServiceStatus(tableId: string, serviceStatus: 'ordered' | 'served' | 'billing' | null): Promise<any | null | undefined> {
+  async updateTableServiceStatus(tableId: string, serviceStatus: 'ordered' | 'served' | 'billing' | null): Promise<Table | null | undefined> {
     const [updated] = await db
       .update(tables)
-      .set({ serviceStatus, updatedAt: new Date().toISOString() } as any)
+      .set({ serviceStatus, updatedAt: new Date().toISOString() })
       .where(eq(tables.id, tableId))
       .returning();
     return updated;
@@ -833,8 +978,8 @@ export class POSStorage implements IStorage {
     businessUnitId: string;
     tableId: string;
     tableNumber?: string | null;
-    cart: any[];
-  }): Promise<{ table: any; ticket: KitchenTicket; newItems: any[]; alreadyOrdered: any[] }> {
+    cart: CartItem[];
+  }): Promise<{ table: Table; ticket: KitchenTicket; newItems: CartItem[]; alreadyOrdered: CartItem[] }> {
     const now = new Date().toISOString();
 
     const existingTableRows = await db
@@ -848,7 +993,7 @@ export class POSStorage implements IStorage {
       throw new Error('Table not found');
     }
 
-    const safeParseArray = (val: any): any[] => {
+    const safeParseArray = (val: string | null | undefined): CartItem[] => {
       if (typeof val !== 'string' || val.trim().length === 0) return [];
       try {
         const parsed = JSON.parse(val);
@@ -858,9 +1003,9 @@ export class POSStorage implements IStorage {
       }
     };
 
-    const prevCart = safeParseArray((existingTable as any).lastOrdered);
+    const prevCart = safeParseArray(existingTable.lastOrdered);
 
-    const keyOf = (it: any) => String(it?.productId || it?.id || it?.product_id || it?.name || crypto.randomUUID());
+    const keyOf = (it: CartItem) => String(it?.productId || it?.id || it?.name || crypto.randomUUID());
 
     const prevMap = new Map<string, number>();
     for (const it of prevCart) {
@@ -869,8 +1014,8 @@ export class POSStorage implements IStorage {
       prevMap.set(k, (prevMap.get(k) || 0) + q);
     }
 
-    const newItems: any[] = [];
-    const alreadyOrdered: any[] = [];
+    const newItems: CartItem[] = [];
+    const alreadyOrdered: CartItem[] = [];
 
     for (const it of input.cart || []) {
       const k = keyOf(it);
@@ -896,9 +1041,10 @@ export class POSStorage implements IStorage {
       .set({
         currentOrder: serialized,
         lastOrdered: serialized,
+        status: 'occupied', // ✅ CRITICAL: Set table to occupied (orange)
         serviceStatus: 'ordered',
         updatedAt: now,
-      } as any)
+      })
       .where(eq(tables.id, input.tableId))
       .returning();
 
@@ -911,28 +1057,104 @@ export class POSStorage implements IStorage {
     const [ticket] = await db
       .insert(kitchenTickets)
       .values({
-        id: crypto.randomUUID(),
         businessUnitId: input.businessUnitId,
         tableId: input.tableId,
         tableNumber: input.tableNumber ?? null,
         items: JSON.stringify(ticketPayload),
         status: 'in_preparation',
-        createdAt: now,
-        updatedAt: now,
-      } as any)
+      })
       .returning();
 
-    return { table: updatedTable, ticket: ticket as any, newItems, alreadyOrdered };
+    return { table: updatedTable, ticket: ticket as KitchenTicket, newItems, alreadyOrdered };
   }
 
   // Kitchen Tickets
   async getKitchenTickets(businessUnitId: string): Promise<KitchenTicket[]> {
-    const rows = await db
+    // 1. Get standard kitchen tickets (Table orders)
+    const tableTickets = await db
       .select()
       .from(kitchenTickets)
       .where(eq(kitchenTickets.businessUnitId, businessUnitId))
       .orderBy(desc(kitchenTickets.createdAt));
-    return rows as any;
+
+    // 2. Get active delivery/takeout orders (all active kitchen workflow states)
+    // Status mapping:
+    // - 'pending' -> Incoming (in_preparation, no startedAt)
+    // - 'preparing' -> Cooking (in_preparation, with startedAt)
+    // - 'ready_for_pickup' -> Ready (ready)
+    // - 'completed' -> Served/History (served)
+    const activeSales = await db
+      .select()
+      .from(sales)
+      .where(
+        and(
+          eq(sales.businessUnitId, businessUnitId),
+          or(eq(sales.orderType, 'delivery'), eq(sales.orderType, 'takeout')),
+          or(
+            eq(sales.status, 'pending'),
+            eq(sales.status, 'preparing'),
+            eq(sales.status, 'ready_for_pickup'),
+            eq(sales.status, 'completed')
+          )
+        )
+      )
+      .orderBy(desc(sales.timestamp));
+
+    // 3. Map sales to KitchenTicket format
+    const deliveryTickets: KitchenTicket[] = [];
+
+    for (const sale of activeSales) {
+      // Create a virtual kitchen ticket
+      let itemsJson = "[]";
+      try {
+        const saleItemsList = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));
+        itemsJson = JSON.stringify(saleItemsList.map(item => ({
+          ...item,
+          name: item.productName
+        })));
+      } catch (e) {
+        console.error("Error fetching items for sale", sale.id);
+      }
+
+      // Map sale status to kitchen ticket status and timestamps
+      let kitchenStatus: 'in_preparation' | 'ready' | 'served' = 'in_preparation';
+      let startedAt: string | null = null;
+      let readyAt: string | null = null;
+      let servedAt: string | null = null;
+
+      if (sale.status === 'preparing') {
+        kitchenStatus = 'in_preparation';
+        startedAt = sale.timestamp;
+      } else if (sale.status === 'ready_for_pickup') {
+        kitchenStatus = 'ready';
+        startedAt = sale.timestamp;
+        readyAt = sale.timestamp;
+      } else if (sale.status === 'completed') {
+        kitchenStatus = 'served';
+        startedAt = sale.timestamp;
+        readyAt = sale.timestamp;
+        servedAt = new Date().toISOString();
+      }
+
+      deliveryTickets.push({
+        id: `sale-${sale.id}`,
+        businessUnitId: sale.businessUnitId,
+        tableId: null,
+        tableNumber: `${sale.customerName || 'Customer'} (${sale.orderType === 'delivery' ? 'Delivery' : 'Takeout'})`,
+        items: itemsJson,
+        status: kitchenStatus,
+        startedAt,
+        readyAt,
+        servedAt,
+        createdAt: sale.timestamp,
+        updatedAt: sale.timestamp
+      });
+    }
+
+    // Return combined list, sorted by creation newest first
+    return [...tableTickets, ...deliveryTickets].sort((a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
   }
 
   async createOrUpdateKitchenTicketForTable(input: {
@@ -965,7 +1187,7 @@ export class POSStorage implements IStorage {
         })
         .where(eq(kitchenTickets.id, existing[0].id))
         .returning();
-      return updated as any;
+      return updated as KitchenTicket;
     }
 
     const toInsert: InsertKitchenTicket = {
@@ -978,14 +1200,10 @@ export class POSStorage implements IStorage {
 
     const [created] = await db
       .insert(kitchenTickets)
-      .values({
-        ...(toInsert as any),
-        createdAt: now,
-        updatedAt: now,
-      })
+      .values(toInsert)
       .returning();
 
-    return created as any;
+    return created as KitchenTicket;
   }
 
   async updateKitchenTicketStatus(id: string, status: KitchenTicketStatus): Promise<KitchenTicket | null | undefined> {
@@ -996,20 +1214,20 @@ export class POSStorage implements IStorage {
       .returning();
     if (updated?.tableId) {
       try {
-        const rows = await db.select().from(tables).where(eq(tables.id, updated.tableId as any)).limit(1);
-        const t = rows[0] as any;
+        const rows = await db.select().from(tables).where(eq(tables.id, updated.tableId)).limit(1);
+        const t = rows[0];
         if (t && t.serviceStatus !== 'billing') {
           const next = status === 'served' ? 'served' : 'ordered';
           await db.update(tables)
-            .set({ serviceStatus: next, updatedAt: new Date().toISOString() } as any)
-            .where(eq(tables.id, updated.tableId as any));
+            .set({ serviceStatus: next, updatedAt: new Date().toISOString() })
+            .where(eq(tables.id, updated.tableId));
         }
       } catch {
         // ignore
       }
     }
 
-    return updated as any;
+    return updated as KitchenTicket;
   }
 
   // App Settings
@@ -1324,13 +1542,26 @@ export class POSStorage implements IStorage {
   }
 
   // Business Units
+  // Helper to normalize business unit type from database (handles legacy capitalized types)
+  private normalizeBusinessUnitType(type: string): BusinessUnit['type'] {
+    return type.toLowerCase() as BusinessUnit['type'];
+  }
+
+  private normalizeBusinessUnit(bu: typeof businessUnits.$inferSelect): BusinessUnit {
+    return {
+      ...bu,
+      type: this.normalizeBusinessUnitType(bu.type),
+    };
+  }
+
   async getBusinessUnits(): Promise<BusinessUnit[]> {
-    return await db.select().from(businessUnits).where(eq(businessUnits.isActive, 'true')).orderBy(businessUnits.name);
+    const rows = await db.select().from(businessUnits).where(eq(businessUnits.isActive, 'true')).orderBy(businessUnits.name);
+    return rows.map(bu => this.normalizeBusinessUnit(bu));
   }
 
   async getBusinessUnit(id: string): Promise<BusinessUnit | null | undefined> {
     const [businessUnit] = await db.select().from(businessUnits).where(eq(businessUnits.id, id));
-    return businessUnit;
+    return businessUnit ? this.normalizeBusinessUnit(businessUnit) : undefined;
   }
 
   async createBusinessUnit(businessUnitData: Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">): Promise<BusinessUnit> {
@@ -1340,7 +1571,7 @@ export class POSStorage implements IStorage {
       updatedAt: new Date().toISOString(),
     };
     const [newBusinessUnit] = await db.insert(businessUnits).values(newBusinessUnitData).returning();
-    return newBusinessUnit;
+    return this.normalizeBusinessUnit(newBusinessUnit);
   }
 
   async updateBusinessUnit(id: string, updates: Partial<Omit<BusinessUnit, "id" | "createdAt" | "updatedAt">>): Promise<BusinessUnit | null | undefined> {
@@ -1352,7 +1583,7 @@ export class POSStorage implements IStorage {
       .set(updateData)
       .where(eq(businessUnits.id, id))
       .returning();
-    return updated;
+    return updated ? this.normalizeBusinessUnit(updated) : undefined;
   }
 
   async deleteBusinessUnit(id: string): Promise<boolean> {
@@ -1363,8 +1594,125 @@ export class POSStorage implements IStorage {
     return !!updated;
   }
 
+  // Public Menu - Get daily specials for online ordering (featured items)
+  async getDailySpecials(businessUnitId?: string): Promise<Product[]> {
+    const allProducts = await db.select().from(products)
+      .where(and(
+        eq(products.status, 'active'),
+        eq(products.isDailySpecial, true)
+      ));
+
+    if (businessUnitId) {
+      return allProducts.filter(p => p.businessUnitId === businessUnitId);
+    }
+    return allProducts;
+  }
+
+  // Public Menu - Get standard menu items (add-ons, drinks, sides)
+  async getStandardMenuItems(businessUnitId?: string): Promise<Product[]> {
+    const allProducts = await db.select().from(products)
+      .where(and(
+        eq(products.status, 'active'),
+        eq(products.isStandardMenu, true)
+      ));
+
+    if (businessUnitId) {
+      return allProducts.filter(p => p.businessUnitId === businessUnitId);
+    }
+    return allProducts;
+  }
+
+  // Get or create online customer for public orders
+  async getOrCreateOnlineCustomer(businessUnitId: string): Promise<Customer> {
+    const existing = await db.select().from(customers)
+      .where(and(
+        eq(customers.name, 'Online Customer'),
+        eq(customers.businessUnitId, businessUnitId)
+      ))
+      .limit(1);
+
+    if (existing.length > 0) {
+      return existing[0];
+    }
+
+    // Create a new online customer
+    const [newCustomer] = await db.insert(customers).values({
+      name: 'Online Customer',
+      phone: 'N/A',
+      email: null,
+      status: 'active',
+      creditLimit: 0,
+      currentBalance: 0,
+      loyaltyPoints: 0,
+      riskTag: 'low',
+      businessUnitId,
+    }).returning();
+
+    return newCustomer;
+  }
+
+  // Get delivery orders for a specific date
+  async getDeliveryOrders(businessUnitId: string, date?: string): Promise<Sale[]> {
+    const allSales = await this.getSales();
+    const targetDate = date || new Date().toISOString().split('T')[0];
+
+    return allSales.filter(sale => {
+      const saleDate = sale.timestamp.split('T')[0];
+      return sale.businessUnitId === businessUnitId &&
+        sale.orderType === 'delivery' &&
+        saleDate === targetDate;
+    });
+  }
+
+  // Get delivery summary for kitchen prep
+  async getDeliverySummary(businessUnitId: string, date?: string): Promise<{ productName: string; totalQuantity: number }[]> {
+    const deliveryOrders = await this.getDeliveryOrders(businessUnitId, date);
+
+    const productSummary = new Map<string, number>();
+
+    for (const order of deliveryOrders) {
+      for (const item of order.items) {
+        const current = productSummary.get(item.productName) || 0;
+        productSummary.set(item.productName, current + item.quantity);
+      }
+    }
+
+    return Array.from(productSummary.entries())
+      .map(([productName, totalQuantity]) => ({ productName, totalQuantity }))
+      .sort((a, b) => b.totalQuantity - a.totalQuantity);
+  }
+
   // Initialize with mock data
   async initialize(): Promise<void> {
+    // Ensure restaurant_tables table exists (manual creation to avoid migration issues)
+    try {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS restaurant_tables (
+          id TEXT PRIMARY KEY NOT NULL,
+          table_number TEXT NOT NULL UNIQUE,
+          table_name TEXT,
+          is_active INTEGER DEFAULT 1,
+          created_at TEXT,
+          updated_at TEXT
+        );
+      `);
+      console.log('[DB] restaurant_tables table ensured');
+    } catch (err) {
+      console.error('[DB] Error creating restaurant_tables table:', err);
+    }
+
+    // Ensure table_number column exists in sales table
+    try {
+      const tableInfo = sqlite.prepare("PRAGMA table_info(sales)").all();
+      const hasTableNumber = (tableInfo as any[]).some((col: any) => col.name === 'table_number');
+      if (!hasTableNumber) {
+        sqlite.exec(`ALTER TABLE sales ADD COLUMN table_number TEXT;`);
+        console.log('[DB] Added table_number column to sales table');
+      }
+    } catch (err) {
+      // Column might already exist, ignore error
+    }
+
     // Ensure settings exist
     await this.getAppSettings();
   }

@@ -12,6 +12,7 @@ interface AuthContextType {
   isOwner: boolean;
   isManager: boolean;
   isCashier: boolean;
+  isWaiter: boolean;
   isKitchen: boolean;
 }
 
@@ -174,9 +175,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!currentStaff) return false;
 
       const roleHierarchy: Record<StaffRole, number> = {
-        owner: 3,
-        manager: 2,
-        cashier: 1,
+        owner: 4,
+        manager: 3,
+        cashier: 2,
+        waiter: 1,
         kitchen: 0,
       };
 
@@ -194,6 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isOwner = currentStaff?.role === "owner";
   const isManager = currentStaff?.role === "manager" || isOwner;
   const isCashier = currentStaff?.role === "cashier";
+  const isWaiter = currentStaff?.role === "waiter";
   const isKitchen = currentStaff?.role === "kitchen";
 
   return (
@@ -208,6 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isOwner,
         isManager,
         isCashier,
+        isWaiter,
         isKitchen,
       }}
     >

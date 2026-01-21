@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./database.sqlite:/usr/src/app/database.sqlite
+      - ./public/uploads:/usr/src/app/public/uploads
+      - ./backups:/usr/src/app/backups
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - SESSION_SECRET=production_secret_key_change_me
+    restart: unless-stopped

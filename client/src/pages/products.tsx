@@ -1,5 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import { useCurrency } from '@/hooks/use-currency';
+import { useToast } from '@/hooks/use-toast';
+import { useBusinessMode } from '@/contexts/BusinessModeContext';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,9 +31,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Package, Plus, Edit, Trash2, Search } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { useBusinessMode } from '@/contexts/BusinessModeContext';
+import { Package, Plus, Edit, Trash2, Search, Star, Coffee } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 
 interface Product {
   id: number;
@@ -40,9 +45,13 @@ interface Product {
   minStock: number;
   barcode?: string;
   imageUrl?: string;
+  isDailySpecial?: boolean;
+  isStandardMenu?: boolean;
 }
 
 export default function Products() {
+  const { t } = useTranslation();
+  const { formatCurrency } = useCurrency();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { businessUnit } = useBusinessMode();
@@ -60,6 +69,8 @@ export default function Products() {
     stock: '',
     minStock: '',
     barcode: '',
+    isDailySpecial: false,
+    isStandardMenu: false,
   });
 
   // Fetch products
@@ -144,11 +155,16 @@ export default function Products() {
       stock: '',
       minStock: '',
       barcode: '',
+      isDailySpecial: false,
+      isStandardMenu: false,
     });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    const normalizedIsDailySpecial = !!formData.isDailySpecial && !formData.isStandardMenu;
+    const normalizedIsStandardMenu = !!formData.isStandardMenu && !formData.isDailySpecial;
 
     const data = {
       name: formData.name,
@@ -158,6 +174,8 @@ export default function Products() {
       stock: parseInt(formData.stock),
       minStock: parseInt(formData.minStock),
       barcode: formData.barcode || undefined,
+      isDailySpecial: normalizedIsDailySpecial,
+      isStandardMenu: normalizedIsStandardMenu,
     };
 
     if (editingProduct) {
@@ -169,6 +187,10 @@ export default function Products() {
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
+
+    const normalizedIsDailySpecial = !!product.isDailySpecial && !product.isStandardMenu;
+    const normalizedIsStandardMenu = !!product.isStandardMenu && !product.isDailySpecial;
+
     setFormData({
       name: product.name,
       category: product.category,
@@ -177,6 +199,8 @@ export default function Products() {
       stock: product.stock.toString(),
       minStock: product.minStock.toString(),
       barcode: product.barcode || '',
+      isDailySpecial: normalizedIsDailySpecial,
+      isStandardMenu: normalizedIsStandardMenu,
     });
     setIsAddDialogOpen(true);
   };
@@ -309,6 +333,62 @@ export default function Products() {
                 />
               </div>
 
+              {/* Online Menu Options */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                  Online Menu Display
+                </Label>
+                <div className="flex items-center space-x-2 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                  <Checkbox
+                    id="isDailySpecial"
+                    checked={formData.isDailySpecial}
+                    onCheckedChange={(checked) => setFormData({
+                      ...formData,
+                      isDailySpecial: checked === true,
+                      // If marking as daily special, uncheck standard menu
+                      isStandardMenu: checked === true ? false : formData.isStandardMenu
+                    })}
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <Label
+                      htmlFor="isDailySpecial"
+                      className="flex items-center gap-2 text-sm font-medium cursor-pointer"
+                    >
+                      <Star className="h-4 w-4 text-orange-500 fill-orange-400" />
+                      Today's Special (Featured)
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Hero section - large cards, "Recommended" badge
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <Checkbox
+                    id="isStandardMenu"
+                    checked={formData.isStandardMenu}
+                    onCheckedChange={(checked) => setFormData({
+                      ...formData,
+                      isStandardMenu: checked === true,
+                      // If marking as standard menu, uncheck daily special
+                      isDailySpecial: checked === true ? false : formData.isDailySpecial
+                    })}
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <Label
+                      htmlFor="isStandardMenu"
+                      className="flex items-center gap-2 text-sm font-medium cursor-pointer"
+                    >
+                      <Coffee className="h-4 w-4 text-blue-500" />
+                      Standard Menu (Add-ons)
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      "Add-ons & Drinks" section - rice, drinks, sides
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-2 justify-end">
                 <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                   Cancel
@@ -390,10 +470,26 @@ export default function Products() {
               <TableBody>
                 {filteredProducts.map((product) => (
                   <TableRow key={product.id}>
-                    <TableCell className="font-medium">{product.name}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {product.name}
+                        {product.isDailySpecial && (
+                          <Badge variant="outline" className="bg-orange-50 text-orange-600 border-orange-200">
+                            <Star className="h-3 w-3 mr-1 fill-orange-400" />
+                            Special
+                          </Badge>
+                        )}
+                        {product.isStandardMenu && (
+                          <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200">
+                            <Coffee className="h-3 w-3 mr-1" />
+                            Add-on
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>{product.category}</TableCell>
-                    <TableCell>${product.price.toFixed(2)}</TableCell>
-                    <TableCell>${product.cost.toFixed(2)}</TableCell>
+                    <TableCell>{formatCurrency(Number(product.price) || 0)}</TableCell>
+                    <TableCell>{formatCurrency(Number(product.cost) || 0)}</TableCell>
                     <TableCell>
                       <span className={product.stock <= product.minStock ? 'text-red-600 font-semibold' : ''}>
                         {product.stock}

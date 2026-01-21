@@ -29,7 +29,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 import { useBusinessMode } from "@/contexts/BusinessModeContext";
-import { Plus, Pencil, Trash2, Users, Shield, UserCog, User, UserX, UserCheck, ChefHat } from "lucide-react";
+import { Plus, Pencil, Trash2, Users, Shield, UserCog, User, UserX, UserCheck, ChefHat, ConciergeBell, Lock } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api-config";
 import type { Staff, StaffRole, StaffStatus } from "@shared/schema";
 
@@ -39,6 +39,7 @@ const roleIcons: Record<StaffRole, typeof Shield> = {
   owner: Shield,
   manager: UserCog,
   cashier: User,
+  waiter: ConciergeBell,
   kitchen: ChefHat,
 };
 
@@ -46,6 +47,7 @@ const roleColors: Record<StaffRole, string> = {
   owner: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   manager: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   cashier: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+  waiter: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
   kitchen: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
 };
 
@@ -60,6 +62,7 @@ export default function StaffPage() {
   const [formData, setFormData] = useState({
     name: "",
     pin: "",
+    password: "", // For owner/manager authentication
     role: "cashier" as StaffRole,
     barcode: "",
     status: "active" as StaffStatus,
@@ -73,7 +76,13 @@ export default function StaffPage() {
       if (!businessUnitId) return [];
       const response = await fetch(`${API_BASE_URL}/api/staff?businessUnitId=${businessUnitId}`, { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch staff');
-      return response.json();
+      const data = await response.json();
+      // Double safety: Filter out any customers or test users that might slip through
+      return data.filter((s: StaffWithoutPin) =>
+        s.role !== 'customer' &&
+        !s.name.includes('Guest') &&
+        !s.name.includes('Test')
+      );
     },
   });
 
@@ -149,7 +158,7 @@ export default function StaffPage() {
   const resetForm = () => {
     setIsDialogOpen(false);
     setEditingStaff(null);
-    setFormData({ name: "", pin: "", role: "cashier", barcode: "", status: "active", businessUnitId: "" });
+    setFormData({ name: "", pin: "", password: "", role: "cashier", barcode: "", status: "active", businessUnitId: "" });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -163,6 +172,10 @@ export default function StaffPage() {
       };
       if (formData.pin) {
         updates.pin = formData.pin;
+      }
+      // Include password only for owner/manager roles
+      if ((formData.role === 'owner' || formData.role === 'manager') && formData.password) {
+        updates.password = formData.password;
       }
       updateMutation.mutate({ id: editingStaff.id, data: updates });
     } else {
@@ -179,6 +192,7 @@ export default function StaffPage() {
     setFormData({
       name: member.name,
       pin: "",
+      password: "",
       role: member.role,
       barcode: member.barcode || "",
       status: member.status,
@@ -402,6 +416,7 @@ export default function StaffPage() {
                   <SelectItem value="owner">Owner (Full Access)</SelectItem>
                   <SelectItem value="manager">Manager (Limited Admin)</SelectItem>
                   <SelectItem value="cashier">Cashier (Sales Only)</SelectItem>
+                  <SelectItem value="waiter">Waiter (Tables & Orders)</SelectItem>
                   <SelectItem value="kitchen">Kitchen (Kitchen View Only)</SelectItem>
                 </SelectContent>
               </Select>
@@ -443,6 +458,27 @@ export default function StaffPage() {
                 data-testid="input-staff-pin"
               />
             </div>
+
+            {/* Password field for Owner/Manager roles */}
+            {(formData.role === 'owner' || formData.role === 'manager') && (
+              <div className="space-y-2">
+                <Label htmlFor="password" className="flex items-center gap-2">
+                  <Lock className="h-4 w-4" />
+                  {editingStaff ? "New Password (leave empty to keep current)" : "Password"}
+                </Label>
+                <Input
+                  id="password"
+                  type="text"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder={editingStaff ? "Enter new password to change" : "Login password"}
+                  data-testid="input-staff-password"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Owners and Managers use passwords for secure login instead of PIN.
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="barcode">Barcode ID (optional)</Label>
               <Input

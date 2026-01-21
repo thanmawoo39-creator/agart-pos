@@ -17,6 +17,14 @@ type RecognizeResult = { name: string | null; category: string | null };
 
 import { Product } from "@shared/schema";
 import { API_BASE_URL } from '@/lib/api-config';
+import { useCurrency } from '@/hooks/use-currency';
+
+type RecognizeApiError = {
+  error?: string;
+  details?: string[];
+};
+
+type VisionRecognizeSuccess = Product;
 
 export function ImageRecognition(props: {
   onRecognized?: (result: RecognizeResult) => void;
@@ -25,6 +33,7 @@ export function ImageRecognition(props: {
   products: Product[];
 }) {
   const { onRecognized, onCaptured, addToCart, products } = props;
+  const { formatCurrency } = useCurrency();
   const [items, setItems] = useState<string[]>([]);
   const [isRecognizing, setIsRecognizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +61,7 @@ export function ImageRecognition(props: {
     setError(null);
     setSuccess(null);
     setItems([]);
-    
+
     const formData = new FormData();
     formData.append('image', file);
 
@@ -62,32 +71,36 @@ export function ImageRecognition(props: {
         body: formData,
       });
 
-      const data = await response.json();
+      const data: unknown = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        const errorDetails = data.details ? `: ${data.details.join(', ')}` : '';
-        throw new Error(data.error || `Failed to recognize image${errorDetails}`);
+        const errObj = (data && typeof data === 'object') ? (data as RecognizeApiError) : {};
+        const errorDetails = Array.isArray(errObj.details) ? `: ${errObj.details.join(', ')}` : '';
+        throw new Error(errObj.error || `Failed to recognize image${errorDetails}`);
       }
-      
-      if (data?.name) {
+
+      const product = data as VisionRecognizeSuccess;
+
+      if (product?.name) {
         // Success - item identified and matched
-        onRecognized?.({ name: data.name, category: data.category ?? null });
-        setItems([data.name + (data.category ? ` (${data.category})` : '')]);
-        setSuccess(`Identified: ${data.name}`);
-        
+        onRecognized?.({ name: product.name, category: product.category ?? null });
+        setItems([product.name + (product.category ? ` (${product.category})` : '')]);
+        setSuccess(`Identified: ${product.name}`);
+
         // Auto-add to cart if addToCart function is provided
         if (addToCart) {
-          addToCart(data);
-          setSuccess(prev => prev + ` - Added to cart ($${data.price.toFixed(2)})`);
+          addToCart(product);
+          setSuccess(prev => prev + ` - Added to cart (${formatCurrency(Number(product.price) || 0)})`);
         }
       } else {
         // This case should ideally not be reached if the backend is robust
         setError('Could not identify item. Please try a clearer photo.');
         setItems([]);
       }
-    } catch (error: any) {
-      console.error('Recognition error:', error);
-      setError(error.message || 'Please try a clearer photo or check your camera.');
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error('Recognition error:', err);
+      setError(err.message || 'Please try a clearer photo or check your camera.');
       setItems([]);
     } finally {
       setIsRecognizing(false);
@@ -112,8 +125,9 @@ export function ImageRecognition(props: {
         if (selectedDeviceId) {
           try {
             stream = await tryConstraints({ video: { deviceId: { exact: selectedDeviceId } }, audio: false });
-          } catch (err: any) {
-            console.warn('getUserMedia with deviceId failed, falling back:', err?.message || err);
+          } catch (err: unknown) {
+            const e = err as Error;
+            console.warn('getUserMedia with deviceId failed, falling back:', e?.message || e);
             stream = null;
           }
         }
@@ -121,17 +135,19 @@ export function ImageRecognition(props: {
         if (!stream) {
           try {
             stream = await tryConstraints({ video: { facingMode: 'environment' }, audio: false });
-          } catch (err: any) {
-            console.error('Primary getUserMedia failed (environment):', err?.name, err?.message || err);
-            if (err?.name === 'NotReadableError') {
+          } catch (err: unknown) {
+            const e = err as Error;
+            console.error('Primary getUserMedia failed (environment):', e?.name, e?.message || e);
+            if (e?.name === 'NotReadableError') {
               setCameraError('Camera is being used by another application');
             }
             // fallback to simpler constraint to avoid OverconstrainedError
             try {
               stream = await tryConstraints({ video: true, audio: false });
-            } catch (err2: any) {
-              console.error('Fallback getUserMedia failed:', err2?.name, err2?.message || err2);
-              if (mounted) setCameraError(err2?.message || 'Failed to access camera');
+            } catch (err2: unknown) {
+              const e2 = err2 as Error;
+              console.error('Fallback getUserMedia failed:', e2?.name, e2?.message || e2);
+              if (mounted) setCameraError(e2?.message || 'Failed to access camera');
               return;
             }
           }
@@ -146,17 +162,19 @@ export function ImageRecognition(props: {
             videoRef.current.muted = true;
             videoRef.current.playsInline = true;
             // explicit autoplay attribute as well as programmatic play
-            (videoRef.current as HTMLVideoElement).autoplay = true as any;
-            await (videoRef.current as HTMLVideoElement).play();
-          } catch (playErr: any) {
-            console.error('Video play() failed after attaching stream:', playErr?.name, playErr?.message || playErr);
+            videoRef.current.autoplay = true;
+            await videoRef.current.play();
+          } catch (playErr: unknown) {
+            const pe = playErr as Error;
+            console.error('Video play() failed after attaching stream:', pe?.name, pe?.message || pe);
           }
         } else {
           console.error('videoRef.current is null after stream obtained');
         }
-      } catch (e: any) {
-        console.error('Unexpected camera initialization error in ImageRecognition:', e?.name, e?.message || e);
-        if (mounted) setCameraError(e?.message || 'Failed to start camera');
+      } catch (e: unknown) {
+        const err = e as Error;
+        console.error('Unexpected camera initialization error in ImageRecognition:', err?.name, err?.message || err);
+        if (mounted) setCameraError(err?.message || 'Failed to start camera');
       }
     };
 
@@ -179,7 +197,8 @@ export function ImageRecognition(props: {
       try {
         streamRef.current?.getTracks().forEach((t) => t.stop());
       } catch (e) {
-        console.error('Error stopping camera tracks (cleanup):', (e as any)?.name || e);
+        const err = e as Error;
+        console.error('Error stopping camera tracks (cleanup):', err?.name || err);
       }
       streamRef.current = null;
       if (videoRef.current) {
@@ -187,7 +206,8 @@ export function ImageRecognition(props: {
           videoRef.current.pause();
           videoRef.current.srcObject = null;
         } catch (e) {
-          console.error('Error clearing video element during cleanup:', (e as any)?.name || e);
+          const err = e as Error;
+          console.error('Error clearing video element during cleanup:', err?.name || err);
         }
       }
     };
@@ -198,7 +218,8 @@ export function ImageRecognition(props: {
     try {
       streamRef.current?.getTracks().forEach((t) => t.stop());
     } catch (e) {
-      console.error('Error stopping camera tracks on stopCamera:', (e as any)?.name || e);
+      const err = e as Error;
+      console.error('Error stopping camera tracks on stopCamera:', err?.name || err);
     }
     streamRef.current = null;
     if (videoRef.current) {
@@ -206,17 +227,18 @@ export function ImageRecognition(props: {
         videoRef.current.pause();
         videoRef.current.srcObject = null;
       } catch (e) {
-        console.error('Error clearing video element in stopCamera:', (e as any)?.name || e);
+        const err = e as Error;
+        console.error('Error clearing video element in stopCamera:', err?.name || err);
       }
     }
     setUseCamera(false);
   };
-  
+
 
   // Capture current frame and either recognize it or return data URL
   const captureFrame = async (options?: { returnDataUrl?: boolean }) => {
     if (!videoRef.current || isCaptureDisabled) return;
-    
+
     setIsCaptureDisabled(true);
     setTimeout(() => setIsCaptureDisabled(false), 2000);
 
@@ -227,13 +249,13 @@ export function ImageRecognition(props: {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
+
     if (options?.returnDataUrl) {
       const dataUrl = canvas.toDataURL('image/png');
       onCaptured?.(dataUrl);
       return;
     }
-    
+
     canvas.toBlob(async (blob) => {
       if (blob) {
         await recognizeImage(new File([blob], 'capture.png', { type: 'image/png' }));

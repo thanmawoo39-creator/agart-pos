@@ -4,10 +4,12 @@ import { ImageRecognition } from '@/components/image-recognition';
 import { Product, CartItem } from '@/types/sales';
 import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL } from '@/lib/api-config';
+import { useCurrency } from '@/hooks/use-currency';
 
 export function AIRecognizePage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const { toast } = useToast();
+  const { formatCurrency } = useCurrency();
 
   // Fetch products
   const { data: products = [] } = useQuery<Product[]>({
@@ -81,12 +83,12 @@ export function AIRecognizePage() {
         <h1 className="text-3xl font-bold">AI Product Recognition</h1>
         <p className="text-muted-foreground">Use AI to identify products and automatically add them to cart</p>
       </div>
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
           <ImageRecognition addToCart={addToCart} products={convertedProducts} />
         </div>
-        
+
         <div>
           <div className="bg-white rounded-lg border p-6">
             <h2 className="text-xl font-semibold mb-4">Cart ({cart.length} items)</h2>
@@ -101,15 +103,15 @@ export function AIRecognizePage() {
                       <p className="text-sm text-muted-foreground">Quantity: {item.quantity}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">${(item.price * item.quantity).toFixed(2)}</p>
-                      <p className="text-sm text-muted-foreground">${item.price.toFixed(2)} each</p>
+                      <p className="font-semibold">{formatCurrency((Number(item.price) || 0) * (Number(item.quantity) || 0))}</p>
+                      <p className="text-sm text-muted-foreground">{formatCurrency(Number(item.price) || 0)} each</p>
                     </div>
                   </div>
                 ))}
                 <div className="border-t pt-2 mt-2">
                   <div className="flex justify-between font-semibold">
                     <span>Total:</span>
-                    <span>${cart.reduce((total, item) => total + (item.price * item.quantity), 0).toFixed(2)}</span>
+                    <span>{formatCurrency(cart.reduce((total, item) => total + ((Number(item.price) || 0) * (Number(item.quantity) || 0)), 0))}</span>
                   </div>
                 </div>
               </div>

@@ -5,6 +5,13 @@ import { isAuthenticated, requireRole } from "../middleware/auth";
 
 const router = Router();
 
+/**
+ * @openapi
+ * tags:
+ *   - name: Inventory
+ *     description: Inventory and stock operations
+ */
+
 const stockAdjustmentSchema = z
     .object({
         quantityChanged: z.number().int().optional(),
@@ -20,6 +27,16 @@ const stockAdjustmentSchema = z
     });
 
 router.get("/logs", isAuthenticated, requireRole('owner', 'manager', 'cashier'), async (_req, res) => {
+    /**
+     * @openapi
+     * /api/inventory/logs:
+     *   get:
+     *     tags: [Inventory]
+     *     summary: List inventory logs
+     *     responses:
+     *       200:
+     *         description: Array of inventory logs
+     */
     try {
         res.json(await storage.getInventoryLogs());
     } catch (error) {
@@ -28,6 +45,22 @@ router.get("/logs", isAuthenticated, requireRole('owner', 'manager', 'cashier'),
 });
 
 router.get("/logs/:productId", isAuthenticated, requireRole('owner', 'manager', 'cashier'), async (req, res) => {
+    /**
+     * @openapi
+     * /api/inventory/logs/{productId}:
+     *   get:
+     *     tags: [Inventory]
+     *     summary: List inventory logs by product
+     *     parameters:
+     *       - in: path
+     *         name: productId
+     *         required: true
+     *         schema:
+     *           type: string
+     *     responses:
+     *       200:
+     *         description: Array of inventory logs
+     */
     try {
         res.json(await storage.getInventoryLogsByProduct(req.params.productId));
     } catch (error) {
@@ -36,6 +69,30 @@ router.get("/logs/:productId", isAuthenticated, requireRole('owner', 'manager', 
 });
 
 router.post("/adjust/:productId", isAuthenticated, requireRole('owner', 'manager', 'cashier'), async (req, res) => {
+    /**
+     * @openapi
+     * /api/inventory/adjust/{productId}:
+     *   post:
+     *     tags: [Inventory]
+     *     summary: Adjust stock for a product
+     *     parameters:
+     *       - in: path
+     *         name: productId
+     *         required: true
+     *         schema:
+     *           type: string
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *     responses:
+     *       200:
+     *         description: Updated product and log
+     *       400:
+     *         description: Invalid request
+     */
     try {
         const parsed = stockAdjustmentSchema.safeParse(req.body);
         if (!parsed.success) {
@@ -60,7 +117,11 @@ router.post("/adjust/:productId", isAuthenticated, requireRole('owner', 'manager
         if (!result) return res.status(404).json({ error: "Product not found" });
         res.json(result);
     } catch (error) {
-        res.status(500).json({ error: "Failed to adjust stock" });
+        const message = error instanceof Error ? error.message : "Failed to adjust stock";
+        if (message.startsWith('Insufficient stock')) {
+            return res.status(400).json({ error: message });
+        }
+        res.status(500).json({ error: message });
     }
 });
 

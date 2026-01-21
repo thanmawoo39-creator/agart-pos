@@ -9,22 +9,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar, Clock, DollarSign, TrendingUp, Users, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useBusinessMode } from '@/contexts/BusinessModeContext';
+import { useCurrency } from '@/hooks/use-currency';
 import type { Shift } from '@shared/schema';
 
 interface ShiftManagementProps {
   className?: string;
 }
 
-const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
-};
-
 export function ShiftManagement({ className }: ShiftManagementProps) {
   const { currentStaff, isOwner, isManager } = useAuth();
   const { businessUnit } = useBusinessMode();
+  const { formatCurrency } = useCurrency();
   const queryClient = useQueryClient();
   const [openDialog, setOpenDialog] = useState(false);
   const [openingCash, setOpeningCash] = useState('');
@@ -32,6 +27,8 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [actualCash, setActualCash] = useState('');
   const [shiftSummary, setShiftSummary] = useState<any>(null);
+
+  const isWaiter = currentStaff?.role === 'waiter';
 
   // Query current shift for logged-in user
   const { data: currentShift, isLoading } = useQuery<Shift | null>({
@@ -88,20 +85,35 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
       setShowCloseModal(false);
       setActualCash('');
       setShiftSummary(data);
-      
-      // Show shift summary with discrepancy information
-      const discrepancy = data.shiftSummary?.cashDifference || 0;
-      if (discrepancy !== 0) {
-        alert(`Shift Closed with Discrepancy!\n\nExpected Cash: ${formatCurrency(data.shiftSummary.expectedCash)}\nActual Cash: ${formatCurrency(data.shiftSummary.actualCash)}\nDifference: ${discrepancy > 0 ? '+' : ''}${formatCurrency(discrepancy)}\n\nAn alert has been created for management.`);
-      } else {
-        alert(`Shift Closed Successfully!\n\nTotal Sales: ${formatCurrency(data.totalSales)}\nCash Sales: ${formatCurrency(data.cashSales)}\nExpected Cash: ${formatCurrency(data.shiftSummary.expectedCash)}\nActual Cash: ${formatCurrency(data.shiftSummary.actualCash)}\nPerfect Balance!`);
+
+      if (!isWaiter) {
+        // Show shift summary with discrepancy information
+        const discrepancy = data.shiftSummary?.cashDifference || 0;
+        if (discrepancy !== 0) {
+          alert(`Shift Closed with Discrepancy!\n\nExpected Cash: ${formatCurrency(data.shiftSummary.expectedCash)}\nActual Cash: ${formatCurrency(data.shiftSummary.actualCash)}\nDifference: ${discrepancy > 0 ? '+' : ''}${formatCurrency(discrepancy)}\n\nAn alert has been created for management.`);
+        } else {
+          alert(`Shift Closed Successfully!\n\nTotal Sales: ${formatCurrency(data.totalSales)}\nCash Sales: ${formatCurrency(data.cashSales)}\nExpected Cash: ${formatCurrency(data.shiftSummary.expectedCash)}\nActual Cash: ${formatCurrency(data.shiftSummary.actualCash)}\nPerfect Balance!`);
+        }
       }
     },
   });
 
   const handleOpenShift = () => {
-    if (!openingCash || !currentStaff?.id) return;
+    if (!currentStaff?.id) return;
     
+    // For waiters, auto-open with 0 cash
+    if (isWaiter) {
+      openShiftMutation.mutate({
+        staffId: currentStaff.id,
+        staffName: currentStaff.name,
+        openingCash: 0,
+        businessUnitId: businessUnit,
+      });
+      return;
+    }
+
+    if (!openingCash) return;
+
     openShiftMutation.mutate({
       staffId: currentStaff.id,
       staffName: currentStaff.name,
@@ -112,12 +124,22 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
 
   const handleCloseShift = () => {
     if (!currentShift) return;
+    
+    // For waiters, auto-close with 0 cash
+    if (isWaiter) {
+      closeShiftMutation.mutate({
+        shiftId: currentShift.id,
+        actualCash: 0,
+      });
+      return;
+    }
+
     setShowCloseModal(true);
   };
 
   const confirmCloseShift = () => {
     if (!actualCash || !currentShift) return;
-    
+
     closeShiftMutation.mutate({
       shiftId: currentShift.id,
       actualCash: parseFloat(actualCash),
@@ -140,6 +162,33 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
 
   if (isLoading) {
     return <Button className={className} disabled>Loading...</Button>;
+  }
+
+  // Simplified UI for Waiters
+  if (isWaiter) {
+    return (
+      <Button 
+        className={`${className} w-full`}
+        variant={currentShift ? 'destructive' : 'default'}
+        onClick={currentShift ? handleCloseShift : handleOpenShift}
+        disabled={openShiftMutation.isPending || closeShiftMutation.isPending}
+        style={!currentShift ? { backgroundColor: '#16a34a', color: 'white' } : {}} // Emerald-600 for open
+      >
+        {openShiftMutation.isPending || closeShiftMutation.isPending ? (
+          'Processing...'
+        ) : currentShift ? (
+          <>
+            <Clock className="w-4 h-4 mr-2" />
+            Clock Out (End Shift)
+          </>
+        ) : (
+          <>
+            <Clock className="w-4 h-4 mr-2" />
+            Clock In (Start Shift)
+          </>
+        )}
+      </Button>
+    );
   }
 
   return (
@@ -346,7 +395,7 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
           )}
         </div>
       </DialogContent>
-      
+
       {/* Closing Modal */}
       <Dialog open={showCloseModal} onOpenChange={setShowCloseModal}>
         <DialogContent className="sm:max-w-md">
@@ -356,7 +405,7 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
               Close Shift - Cash Count
             </DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             {currentShift && (
               <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
@@ -379,7 +428,7 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
                 </div>
               </div>
             )}
-            
+
             <div className="space-y-2">
               <Label htmlFor="actualCash">Actual Cash in Hand</Label>
               <Input
@@ -392,27 +441,25 @@ export function ShiftManagement({ className }: ShiftManagementProps) {
                 step="0.01"
               />
             </div>
-            
+
             {actualCash && currentShift && (
-              <div className={`p-3 rounded-lg border ${
-                parseFloat(actualCash) - (currentShift.openingCash + currentShift.cashSales) === 0
-                  ? 'bg-green-50 border-green-200'
-                  : 'bg-red-50 border-red-200'
-              }`}>
+              <div className={`p-3 rounded-lg border ${parseFloat(actualCash) - (currentShift.openingCash + currentShift.cashSales) === 0
+                ? 'bg-green-50 border-green-200'
+                : 'bg-red-50 border-red-200'
+                }`}>
                 <div className="flex justify-between items-center">
                   <span className="font-medium">Discrepancy:</span>
-                  <span className={`font-bold ${
-                    parseFloat(actualCash) - (currentShift.openingCash + currentShift.cashSales) === 0
-                      ? 'text-green-600'
-                      : 'text-red-600'
-                  }`}>
+                  <span className={`font-bold ${parseFloat(actualCash) - (currentShift.openingCash + currentShift.cashSales) === 0
+                    ? 'text-green-600'
+                    : 'text-red-600'
+                    }`}>
                     {parseFloat(actualCash) - (currentShift.openingCash + currentShift.cashSales) > 0 ? '+' : ''}
                     {formatCurrency(parseFloat(actualCash) - (currentShift.openingCash + currentShift.cashSales))}
                   </span>
                 </div>
               </div>
             )}
-            
+
             <div className="flex gap-2">
               <Button
                 variant="outline"

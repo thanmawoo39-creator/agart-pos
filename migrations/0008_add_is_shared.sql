@@ -1,0 +1,3 @@
+
+ALTER TABLE products ADD COLUMN is_shared INTEGER DEFAULT 0;
+ALTER TABLE catering_products ADD COLUMN is_shared INTEGER DEFAULT 0;

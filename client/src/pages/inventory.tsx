@@ -40,12 +40,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 import { Package, AlertTriangle, Plus, Minus, Search, History, Barcode, Shuffle, Lock, Image, Pencil, Trash, Loader2, Sparkles, ScanLine } from "lucide-react";
-import type { Product, InventoryLog, BusinessUnit } from "@shared/schema";
+import type { Product, InventoryLog, BusinessUnit, InsertProduct } from "@shared/schema";
 import { API_BASE_URL } from "@/lib/api-config";
 import MobileScanner from "@/components/MobileScanner";
+import { useCurrency } from "@/hooks/use-currency";
+import { useBusinessMode } from "@/contexts/BusinessModeContext";
 
 type NewProductForm = {
   name: string;
@@ -71,18 +74,23 @@ function generateBarcode(): string {
 export default function Inventory() {
   const { toast } = useToast();
   const { session, canAccess } = useAuth();
+  const { formatCurrency } = useCurrency();
+  const { businessUnit: activeBusinessUnitId } = useBusinessMode();
   const [searchTerm, setSearchTerm] = useState("");
   const [barcodeSearch, setBarcodeSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [selectedBusinessUnitId, setSelectedBusinessUnitId] = useState<string | null>(null);
+  const selectedBusinessUnitId = activeBusinessUnitId;
   const [adjustModalOpen, setAdjustModalOpen] = useState(false);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [addProductModalOpen, setAddProductModalOpen] = useState(false);
+  const [isDailyMenuOpen, setIsDailyMenuOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [adjustmentType, setAdjustmentType] = useState<"add" | "subtract">("add");
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
+  const [dailyMenuState, setDailyMenuState] = useState<Record<string, { isDailySpecial: boolean; isStandardMenu: boolean }>>({});
+  const [dailyMenuDirty, setDailyMenuDirty] = useState<Record<string, boolean>>({});
 
   const [newProduct, setNewProduct] = useState<NewProductForm>({
     name: "",
@@ -108,28 +116,34 @@ export default function Inventory() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // AI Product Recognition
+  type IdentifyProductResponse = {
+    name?: string;
+    category?: string;
+    estimatedPrice?: number;
+  };
+
   const identifyProductMutation = useMutation({
     mutationFn: async (imageData: string) => {
       const response = await apiRequest("POST", "/api/ai/identify-product", { image: imageData });
-      return response.json();
+      return (await response.json()) as IdentifyProductResponse;
     },
     onSuccess: (data) => {
       // Auto-populate form fields with AI response
       if (data.name) {
-        setNewProduct(prev => ({ ...prev, name: data.name }));
+        setNewProduct(prev => ({ ...prev, name: data.name as string }));
       }
       if (data.category) {
-        setNewProduct(prev => ({ ...prev, category: data.category }));
+        setNewProduct(prev => ({ ...prev, category: data.category as string }));
       }
-      if (data.estimatedPrice) {
-        setNewProduct(prev => ({ ...prev, price: data.estimatedPrice.toString() }));
+      if (data.estimatedPrice !== undefined) {
+        setNewProduct(prev => ({ ...prev, price: data.estimatedPrice!.toString() }));
       }
       toast({
         title: "AI Product Recognition",
         description: "Product details have been automatically filled. Please review and save.",
       });
     },
-    onError: (error) => {
+    onError: () => {
       toast({
         title: "AI Recognition Failed",
         description: "Could not identify the product. Please enter details manually.",
@@ -161,14 +175,9 @@ export default function Inventory() {
     }
   });
 
-  useEffect(() => {
-    if (selectedBusinessUnitId) return;
-    if (!businessUnits || businessUnits.length === 0) return;
-
-    const sessionBu = (session as any)?.staff?.businessUnitId as string | undefined;
-    const initial = sessionBu || businessUnits[0].id;
-    setSelectedBusinessUnitId(initial);
-  }, [businessUnits, selectedBusinessUnitId, session]);
+  const activeBusinessUnit = businessUnits.find((bu) => bu.id === selectedBusinessUnitId) || null;
+  const activeBusinessUnitType = typeof (activeBusinessUnit as any)?.type === 'string' ? (activeBusinessUnit as any).type.toLowerCase() : '';
+  const isRestaurantMode = activeBusinessUnitType === 'restaurant';
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ['products', selectedBusinessUnitId],
@@ -181,6 +190,21 @@ export default function Inventory() {
       return response.json();
     },
     enabled: isLoggedIn && !!selectedBusinessUnitId,
+  });
+
+  const restaurantBusinessUnitId = isRestaurantMode ? selectedBusinessUnitId : null;
+
+  const {
+    data: dailyMenuProducts = [],
+    isLoading: dailyMenuProductsLoading,
+  } = useQuery<Product[]>({
+    queryKey: ['products', 'daily-menu', restaurantBusinessUnitId],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/products?businessUnitId=${restaurantBusinessUnitId}`, { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch products');
+      return response.json();
+    },
+    enabled: isLoggedIn && isDailyMenuOpen && !!restaurantBusinessUnitId,
   });
 
   const { data: productLogs = [], isLoading: logsLoading } = useQuery<InventoryLog[]>({
@@ -219,7 +243,8 @@ export default function Inventory() {
       try {
         streamRef.current?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
       } catch (e) {
-        console.error('Error stopping camera tracks when modal closed:', (e as any)?.name || e);
+        const err = e as Error;
+        console.error('Error stopping camera tracks when modal closed:', err?.name || err);
       }
       streamRef.current = null;
       if (videoRef.current) {
@@ -238,16 +263,18 @@ export default function Inventory() {
       try {
         try {
           stream = await tryConstraints({ video: { facingMode: 'environment' } });
-        } catch (err: any) {
-          console.error('Inventory primary getUserMedia failed (environment):', err?.name, err?.message || err);
-          if (err?.name === 'NotReadableError') {
+        } catch (err) {
+          const e = err as Error;
+          console.error('Inventory primary getUserMedia failed (environment):', e?.name, e?.message || e);
+          if (e?.name === 'NotReadableError') {
             setCameraError('Camera is being used by another application');
           }
           try {
             stream = await tryConstraints({ video: true });
-          } catch (err2: any) {
-            console.error('Inventory fallback getUserMedia failed:', err2?.name, err2?.message || err2);
-            if (mounted) setCameraError(err2?.message || 'Failed to access camera');
+          } catch (err2) {
+            const e2 = err2 as Error;
+            console.error('Inventory fallback getUserMedia failed:', e2?.name, e2?.message || e2);
+            if (mounted) setCameraError(e2?.message || 'Failed to access camera');
             return;
           }
         }
@@ -259,17 +286,19 @@ export default function Inventory() {
             videoRef.current.srcObject = stream;
             videoRef.current.muted = true;
             videoRef.current.playsInline = true;
-            (videoRef.current as HTMLVideoElement).autoplay = true as any;
-            await (videoRef.current as HTMLVideoElement).play();
-          } catch (playErr: any) {
-            console.error('Inventory video play() failed after attaching stream:', playErr?.name, playErr?.message || playErr);
+            videoRef.current.autoplay = true;
+            await videoRef.current.play();
+          } catch (playErr) {
+            const pe = playErr as Error;
+            console.error('Inventory video play() failed after attaching stream:', pe?.name, pe?.message || pe);
           }
         } else {
           console.error('inventory videoRef.current is null after stream obtained');
         }
-      } catch (e: any) {
-        console.error('Unexpected camera initialization error in Inventory:', e?.name, e?.message || e);
-        if (mounted) setCameraError(e?.message || 'Failed to start camera');
+      } catch (e) {
+        const err = e as Error;
+        console.error('Unexpected camera initialization error in Inventory:', err?.name, err?.message || err);
+        if (mounted) setCameraError(err?.message || 'Failed to start camera');
       }
     };
 
@@ -277,7 +306,7 @@ export default function Inventory() {
 
     return () => {
       mounted = false;
-      try { streamRef.current?.getTracks().forEach((t: MediaStreamTrack) => t.stop()); } catch (e) { console.error('Error stopping camera tracks (inventory cleanup):', (e as any)?.name || e); }
+      try { streamRef.current?.getTracks().forEach((t: MediaStreamTrack) => t.stop()); } catch (e) { const err = e as Error; console.error('Error stopping camera tracks (inventory cleanup):', err?.name || err); }
       streamRef.current = null;
       if (videoRef.current) {
         try { videoRef.current.pause(); videoRef.current.srcObject = null; } catch (e) { console.error(e); }
@@ -302,26 +331,28 @@ export default function Inventory() {
       toast({ title: "Stock adjusted successfully" });
       closeAdjustModal();
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({
         title: "Failed to adjust stock",
-        description: error.message,
+        description: err.message,
         variant: "destructive",
       });
     },
   });
 
   const createProductMutation = useMutation({
-    mutationFn: (data: Omit<Product, "id" | "status"> & { status?: string }) => apiRequest("POST", "/api/products", data),
+    mutationFn: (data: InsertProduct) => apiRequest("POST", "/api/products", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       toast({ title: "Product added successfully" });
       closeAddProductModal();
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({
         title: "Failed to add product",
-        description: error.message,
+        description: err.message,
         variant: "destructive",
       });
     },
@@ -335,7 +366,8 @@ export default function Inventory() {
       setIsEditingProduct(false);
       closeAddProductModal();
     },
-    onError: (err: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({ title: "Failed to update product", description: err.message, variant: 'destructive' });
     }
   });
@@ -346,9 +378,49 @@ export default function Inventory() {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       toast({ title: "Product deleted" });
     },
-    onError: (err: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({ title: "Failed to delete", description: err.message, variant: 'destructive' });
     }
+  });
+
+  useEffect(() => {
+    if (!isDailyMenuOpen) return;
+    const nextState: Record<string, { isDailySpecial: boolean; isStandardMenu: boolean }> = {};
+    dailyMenuProducts.forEach((p) => {
+      nextState[p.id] = {
+        isDailySpecial: !!(p as any).isDailySpecial,
+        isStandardMenu: !!(p as any).isStandardMenu,
+      };
+    });
+    setDailyMenuState(nextState);
+    setDailyMenuDirty({});
+  }, [isDailyMenuOpen, dailyMenuProducts]);
+
+  const bulkMenuUpdateMutation = useMutation({
+    mutationFn: async (changes: Array<{ id: string; isDailySpecial: boolean; isStandardMenu: boolean }>) => {
+      await Promise.all(
+        changes.map(async (c) => {
+          await apiRequest('PATCH', `/api/products/${c.id}`, {
+            isDailySpecial: c.isDailySpecial,
+            isStandardMenu: c.isStandardMenu,
+          });
+        })
+      );
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      if (restaurantBusinessUnitId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/public/menu', restaurantBusinessUnitId] });
+      }
+      toast({ title: 'Daily menu updated' });
+      setIsDailyMenuOpen(false);
+    },
+    onError: (error: unknown) => {
+      const err = error as Error;
+      toast({ title: 'Failed to update daily menu', description: err.message, variant: 'destructive' });
+    },
   });
 
   useEffect(() => {
@@ -443,13 +515,13 @@ export default function Inventory() {
       barcode: newProduct.barcode.trim() || undefined,
       price,
       cost: isNaN(cost) ? undefined : cost,
-      imageData: (newProduct as any).imageData || undefined,
+      imageData: newProduct.imageData || undefined,
       imageUrl: newProduct.imageUrl || undefined,
       stock,
       minStockLevel: minStock,
       category: newProduct.category.trim() || null,
       unit: newProduct.unit || "pcs",
-      businessUnitId: selectedBusinessUnitId,
+      businessUnitId: selectedBusinessUnitId || undefined,
     };
 
     if (isEditing && selectedProduct) {
@@ -475,15 +547,17 @@ export default function Inventory() {
           videoRef.current.srcObject = stream;
           videoRef.current.muted = true;
           videoRef.current.playsInline = true;
-          videoRef.current.autoplay = true as any;
+          videoRef.current.autoplay = true;
           await videoRef.current.play();
-        } catch (playErr: any) {
-          console.error('Inventory video play() failed after attaching stream:', playErr?.name, playErr?.message || playErr);
+        } catch (playErr) {
+          const pe = playErr as Error;
+          console.error('Inventory video play() failed after attaching stream:', pe?.name, pe?.message || pe);
         }
       }
       setCameraModalOpen(true);
-    } catch (err: any) {
-      console.error('Could not access camera in Inventory:', err?.name || 'UnknownError', err?.message || err);
+    } catch (err) {
+      const e = err as Error;
+      console.error('Could not access camera in Inventory:', e?.name || 'UnknownError', e?.message || e);
     }
   };
 
@@ -491,7 +565,8 @@ export default function Inventory() {
     try {
       streamRef.current?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
     } catch (e) {
-      console.error('Error stopping camera tracks:', (e as any)?.name || e);
+      const err = e as Error;
+      console.error('Error stopping camera tracks:', err?.name || err);
     }
     streamRef.current = null;
     if (videoRef.current) {
@@ -542,19 +617,18 @@ export default function Inventory() {
       reader.onload = () => resolve(reader.result as string);
       reader.readAsDataURL(blob);
     });
-    setNewProduct((prev) => ({ ...prev, imageData: dataUrl } as any));
+    setNewProduct((prev) => ({ ...prev, imageData: dataUrl }));
     stopCamera();
   };
 
   const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))) as string[];
 
   const filteredProducts = products.filter((product) => {
-    const matchesBusinessUnit = !selectedBusinessUnitId || product.businessUnitId === selectedBusinessUnitId;
     const matchesSearch =
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.barcode?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = categoryFilter === "all" || product.category === categoryFilter;
-    return matchesBusinessUnit && matchesSearch && matchesCategory;
+    return matchesSearch && matchesCategory;
   });
 
   const lowStockCount = products.filter((p) => p.stock <= p.minStockLevel).length;
@@ -592,10 +666,21 @@ export default function Inventory() {
               Please Login to Manage Stock
             </Badge>
           ) : canManageStock ? (
-            <Button onClick={() => { setIsEditing(false); setNewProduct({ name: "", barcode: "", price: "", cost: "", stock: "", minStockLevel: "", category: "", unit: "pcs", imageData: undefined, imageUrl: undefined }); setAddProductModalOpen(true); }} data-testid="button-add-product">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Product
-            </Button>
+            <>
+              {isRestaurantMode && (
+                <Button
+                  variant="outline"
+                  onClick={() => setIsDailyMenuOpen(true)}
+                  data-testid="button-manage-daily-menu"
+                >
+                  📅 Manage Daily Menu
+                </Button>
+              )}
+              <Button onClick={() => { setIsEditing(false); setNewProduct({ name: "", barcode: "", price: "", cost: "", stock: "", minStockLevel: "", category: "", unit: "pcs", imageData: undefined, imageUrl: undefined }); setAddProductModalOpen(true); }} data-testid="button-add-product">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Product
+              </Button>
+            </>
           ) : null}
         </div>
       </div>
@@ -616,7 +701,7 @@ export default function Inventory() {
               data-testid="input-barcode-scan"
             />
             <div className="ml-auto text-sm text-muted-foreground">
-              Total Stock Value: <span className="font-bold text-foreground">${Math.round(totalStockValue)}</span>
+              Total Stock Value: <span className="font-bold text-foreground">{formatCurrency(Number(totalStockValue) || 0)}</span>
             </div>
           </div>
         </CardContent>
@@ -633,18 +718,13 @@ export default function Inventory() {
             data-testid="input-search"
           />
         </div>
-        <Select value={selectedBusinessUnitId || ''} onValueChange={(v) => setSelectedBusinessUnitId(v)}>
-          <SelectTrigger className="w-[220px]" data-testid="select-business-unit">
-            <SelectValue placeholder="Select Store" />
-          </SelectTrigger>
-          <SelectContent>
-            {businessUnits.map((unit) => (
-              <SelectItem key={unit.id} value={unit.id}>
-                {unit.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Input
+          value={activeBusinessUnit?.name || ''}
+          placeholder="Store"
+          disabled
+          className="w-[220px]"
+          data-testid="input-active-business-unit"
+        />
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="w-[180px]" data-testid="select-category">
             <SelectValue placeholder="All Categories" />
@@ -732,7 +812,7 @@ export default function Inventory() {
                         {product.barcode || "-"}
                       </TableCell>
                       <TableCell className="text-right">
-                        ${Math.round(product.price)}
+                        {formatCurrency(Number(product.price) || 0)}
                       </TableCell>
                       <TableCell className="text-right hidden md:table-cell">
                         {profitMargin ? (
@@ -752,7 +832,7 @@ export default function Inventory() {
                         </span>
                       </TableCell>
                       <TableCell className="text-right hidden sm:table-cell">
-                        <span className="font-medium">${Math.round(stockValue)}</span>
+                        <span className="font-medium">{formatCurrency(Number(stockValue) || 0)}</span>
                       </TableCell>
                       <TableCell className="text-center text-muted-foreground hidden sm:table-cell">
                         {product.minStockLevel}
@@ -836,6 +916,17 @@ export default function Inventory() {
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
+              <Label htmlFor="product-store">Store</Label>
+              <Input
+                id="product-store"
+                value={activeBusinessUnit?.name || ''}
+                placeholder="Store"
+                disabled
+                data-testid="input-product-store"
+              />
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="product-name">
                 Product Name <span className="text-destructive">*</span>
               </Label>
@@ -888,7 +979,7 @@ export default function Inventory() {
                   <>
                     <Button
                       variant="outline"
-                      onClick={() => setNewProduct((p) => ({ ...p, imageData: undefined } as any))}
+                      onClick={() => setNewProduct((p) => ({ ...p, imageData: undefined }))}
                     >
                       Remove Photo
                     </Button>
@@ -914,7 +1005,7 @@ export default function Inventory() {
                 )}
               </div>
               {newProduct.imageData && (
-                <img src={(newProduct as any).imageData} alt="preview" className="mt-2 max-h-40 object-contain border" />
+                <img src={newProduct.imageData} alt="preview" className="mt-2 max-h-40 object-contain border" />
               )}
             </div>
 
@@ -1055,6 +1146,119 @@ export default function Inventory() {
               {isEditing
                 ? updateProductMutation.isPending ? "Saving..." : "Save Changes"
                 : createProductMutation.isPending ? "Adding..." : "Add Product"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDailyMenuOpen} onOpenChange={setIsDailyMenuOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Daily Menu Setup</DialogTitle>
+            <DialogDescription>
+              Toggle items for today's online menu.
+            </DialogDescription>
+          </DialogHeader>
+
+          {dailyMenuProductsLoading ? (
+            <div className="py-10 flex items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Product Name</TableHead>
+                    <TableHead className="hidden md:table-cell">Category</TableHead>
+                    <TableHead className="text-center">Daily Special</TableHead>
+                    <TableHead className="text-center">Standard Menu</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {dailyMenuProducts.map((p) => {
+                    const flags = dailyMenuState[p.id] || {
+                      isDailySpecial: !!(p as any).isDailySpecial,
+                      isStandardMenu: !!(p as any).isStandardMenu,
+                    };
+
+                    return (
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell className="hidden md:table-cell text-muted-foreground">{p.category || '-'}</TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center">
+                            <Switch
+                              checked={flags.isDailySpecial}
+                              onCheckedChange={(checked) => {
+                                setDailyMenuState((prev) => {
+                                  const current = prev[p.id] || flags;
+                                  return {
+                                    ...prev,
+                                    [p.id]: {
+                                      isDailySpecial: checked === true,
+                                      isStandardMenu: checked === true ? false : current.isStandardMenu,
+                                    },
+                                  };
+                                });
+                                setDailyMenuDirty((prev) => ({ ...prev, [p.id]: true }));
+                              }}
+                            />
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center">
+                            <Switch
+                              checked={flags.isStandardMenu}
+                              onCheckedChange={(checked) => {
+                                setDailyMenuState((prev) => {
+                                  const current = prev[p.id] || flags;
+                                  return {
+                                    ...prev,
+                                    [p.id]: {
+                                      isDailySpecial: checked === true ? false : current.isDailySpecial,
+                                      isStandardMenu: checked === true,
+                                    },
+                                  };
+                                });
+                                setDailyMenuDirty((prev) => ({ ...prev, [p.id]: true }));
+                              }}
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDailyMenuOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const changes = Object.keys(dailyMenuDirty)
+                  .filter((id) => dailyMenuDirty[id])
+                  .map((id) => {
+                    const flags = dailyMenuState[id];
+                    const isDailySpecial = !!flags?.isDailySpecial;
+                    const isStandardMenu = !!flags?.isStandardMenu && !isDailySpecial;
+                    return { id, isDailySpecial, isStandardMenu };
+                  });
+
+                if (changes.length === 0) {
+                  toast({ title: 'No changes to save' });
+                  return;
+                }
+
+                bulkMenuUpdateMutation.mutate(changes);
+              }}
+              disabled={bulkMenuUpdateMutation.isPending}
+            >
+              {bulkMenuUpdateMutation.isPending ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>

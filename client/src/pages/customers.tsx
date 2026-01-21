@@ -61,6 +61,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { API_BASE_URL } from "@/lib/api-config";
 import { useBusinessMode } from "@/contexts/BusinessModeContext";
+import { useCurrency } from "@/hooks/use-currency";
 import {
   Users,
   Search,
@@ -84,7 +85,7 @@ const customerFormSchema = z.object({
   creditLimit: z.coerce.number().min(0, "Credit limit must be positive"),
   dueDate: z.string().optional().or(z.literal("")),
   monthlyClosingDay: z
-    .union([z.coerce.number().int().min(1).max(31), z.literal("" as any)])
+    .union([z.coerce.number().int().min(1).max(31), z.literal("")])
     .optional(),
 });
 
@@ -97,6 +98,7 @@ type RepaymentFormValues = z.infer<typeof repaymentFormSchema>;
 
 export default function Customers() {
   const { toast } = useToast();
+  const { formatCurrency } = useCurrency();
   const { businessUnit } = useBusinessMode();
   const businessUnitId = businessUnit;
   const [scanInput, setScanInput] = useState("");
@@ -126,7 +128,7 @@ export default function Customers() {
       imageUrl: "",
       creditLimit: 0,
       dueDate: "",
-      monthlyClosingDay: "" as any,
+      monthlyClosingDay: "",
     },
   });
 
@@ -284,13 +286,15 @@ export default function Customers() {
             videoRef.current.playsInline = true;
             await videoRef.current.play();
           } catch (e) {
+            const err = e as Error;
             console.error('Error playing customer video:', e);
-            setCameraError((e as any)?.message || 'Could not play camera stream');
+            setCameraError(err?.message || 'Could not play camera stream');
           }
         }
-      } catch (err: any) {
-        console.error('Could not access camera in Customers modal:', err?.name || err);
-        setCameraError(err?.message || 'Failed to access camera');
+      } catch (err: unknown) {
+        const e = err as Error;
+        console.error('Could not access camera in Customers modal:', e?.name || e);
+        setCameraError(e?.message || 'Failed to access camera');
       }
     };
 
@@ -369,7 +373,7 @@ export default function Customers() {
           const customer: Customer = await response.json();
           toast({
             title: "Customer Found",
-            description: `${customer.name} - Balance: $${customer.currentBalance.toFixed(2)}`,
+            description: `${customer.name} - Balance: ${formatCurrency(Number(customer.currentBalance) || 0)}`,
           });
         } else {
           toast({
@@ -387,15 +391,8 @@ export default function Customers() {
       }
       setScanInput("");
     },
-    [toast]
+    [toast, formatCurrency]
   );
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
-  };
 
   const filteredCustomers = Array.isArray(customers)
     ? customers.filter(
@@ -417,8 +414,8 @@ export default function Customers() {
       barcode: c.barcode || "",
       imageUrl: c.imageUrl || "",
       creditLimit: c.creditLimit || 0,
-      dueDate: (c as any).dueDate || "",
-      monthlyClosingDay: ((c as any).monthlyClosingDay ?? "") as any,
+      dueDate: c.dueDate ?? "",
+      monthlyClosingDay: c.monthlyClosingDay ?? "",
     });
     setIsAddDialogOpen(true);
   };
@@ -436,8 +433,22 @@ export default function Customers() {
   };
 
   const updateCustomerMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      return apiRequest('PATCH', `/api/customers/${id}`, { ...data, businessUnitId });
+    mutationFn: async ({ id, data }: { id: string; data: CustomerFormValues }) => {
+      let imageUrl = data.imageUrl;
+      if (tempImageData) {
+        const uploadedUrl = await uploadCustomerImage();
+        if (!uploadedUrl) {
+          throw new Error("Failed to upload customer image");
+        }
+        imageUrl = uploadedUrl;
+      }
+
+      return apiRequest('PATCH', `/api/customers/${id}`, {
+        ...data,
+        email: data.email || undefined,
+        imageUrl: imageUrl || undefined,
+        businessUnitId,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers', businessUnitId] });
@@ -494,9 +505,27 @@ export default function Customers() {
             Manage customer accounts and credit
           </p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+          setIsAddDialogOpen(open);
+          if (!open) setEditingCustomer(null); // Clear edit state on close
+        }}>
           <DialogTrigger asChild>
-            <Button data-testid="button-add-customer">
+            <Button
+              onClick={() => {
+                setEditingCustomer(null);
+                form.reset({
+                  name: "",
+                  phone: "",
+                  email: "",
+                  barcode: "",
+                  imageUrl: "",
+                  creditLimit: 0,
+                  dueDate: "",
+                  monthlyClosingDay: "",
+                });
+              }}
+              data-testid="button-add-customer"
+            >
               <Plus className="w-4 h-4 mr-2" />
               Add Customer
             </Button>
@@ -504,11 +533,17 @@ export default function Customers() {
           <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
             <>
               <DialogHeader>
-                <DialogTitle>Add New Customer</DialogTitle>
+                <DialogTitle>{editingCustomer ? "Edit Customer" : "Add New Customer"}</DialogTitle>
               </DialogHeader>
               <Form {...form}>
                 <form
-                  onSubmit={form.handleSubmit((data) => createCustomerMutation.mutate(data))}
+                  onSubmit={form.handleSubmit((data) => {
+                    if (editingCustomer) {
+                      updateCustomerMutation.mutate({ id: editingCustomer.id, data });
+                    } else {
+                      createCustomerMutation.mutate(data);
+                    }
+                  })}
                   className="grid grid-cols-1 md:grid-cols-2 gap-4"
                 >
                   <FormField
@@ -609,7 +644,7 @@ export default function Customers() {
                     name="creditLimit"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Credit Limit ($)</FormLabel>
+                        <FormLabel>Credit Limit</FormLabel>
                         <FormControl>
                           <Input type="number" placeholder="500" {...field} data-testid="input-customer-credit-limit" />
                         </FormControl>
@@ -647,10 +682,16 @@ export default function Customers() {
                     <Button
                       type="submit"
                       className="flex-1 md:flex-none"
-                      disabled={createCustomerMutation.isPending || isUploadingImage}
+                      disabled={createCustomerMutation.isPending || updateCustomerMutation.isPending || isUploadingImage}
                       data-testid="button-submit-customer"
                     >
-                      {isUploadingImage ? "Uploading Image..." : createCustomerMutation.isPending ? "Adding..." : "Add Customer"}
+                      {isUploadingImage
+                        ? "Uploading Image..."
+                        : (editingCustomer
+                          ? (updateCustomerMutation.isPending ? "Updating..." : "Update Customer")
+                          : (createCustomerMutation.isPending ? "Adding..." : "Add Customer")
+                        )
+                      }
                     </Button>
                     <Button type="button" variant="outline" onClick={() => { form.reset(); setTempImageData(null); setIsAddDialogOpen(false); }}>Cancel</Button>
                   </div>

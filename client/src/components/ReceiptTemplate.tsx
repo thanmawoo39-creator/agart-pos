@@ -1,6 +1,11 @@
 import React, { forwardRef, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useBusinessMode } from '@/contexts/BusinessModeContext';
 import { API_BASE_URL } from '@/lib/api-config';
+import { useCurrency } from '@/hooks/use-currency';
+
+// STRICT BUSINESS UNIT ISOLATION: Restaurant = Myanmar translations, Grocery = English
+const RESTAURANT_BUSINESS_UNIT_ID = '2';
 
 interface StoreSettings {
   location?: string;
@@ -35,8 +40,13 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptTemplateProps>(
   amountGiven,
   change
 }, ref) => {
+  const { t } = useTranslation();
   const { businessUnit } = useBusinessMode();
+  const { formatCurrency } = useCurrency();
   const [storeInfo, setStoreInfo] = useState<{ name: string; settings?: StoreSettings } | null>(null);
+
+  // STRICT BUSINESS UNIT ISOLATION: Use Myanmar translations for Restaurant, English for Grocery
+  const isRestaurant = businessUnit === RESTAURANT_BUSINESS_UNIT_ID;
 
   useEffect(() => {
     const fetchStoreInfo = async () => {
@@ -48,7 +58,7 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptTemplateProps>(
         if (response.ok) {
           const businessUnits = await response.json();
           const currentStore = businessUnits.find((unit: any) => unit.id === businessUnit);
-          
+
           if (currentStore) {
             const settings = currentStore.settings ? JSON.parse(currentStore.settings) : {};
             setStoreInfo({
@@ -76,9 +86,9 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptTemplateProps>(
       {/* Header */}
       <div className="text-center mb-4">
         {storeLogoUrl ? (
-          <img 
-            src={storeLogoUrl} 
-            alt={`${storeName} Logo`} 
+          <img
+            src={storeLogoUrl}
+            alt={`${storeName} Logo`}
             className="h-12 mx-auto mb-2 object-contain"
             onError={(e) => {
               // Fallback to text if image fails to load
@@ -115,11 +125,11 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptTemplateProps>(
 
       {/* Items List */}
       <div className="mb-4">
-        <h2 className="text-sm font-semibold mb-2">Items</h2>
+        <h2 className="text-sm font-semibold mb-2">{isRestaurant ? t('receipt.items') : 'Items'}</h2>
         {cartItems.map((item, index) => (
           <div key={index} className="flex justify-between text-xs mb-1">
             <span>{item.name}</span>
-            <span>{item.quantity} x ${(item.price || 0).toFixed(2)}</span>
+            <span>{item.quantity} x {formatCurrency(Number(item.price) || 0)}</span>
           </div>
         ))}
       </div>
@@ -131,18 +141,18 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptTemplateProps>(
       <div className="text-right mb-4">
         <div className="text-sm">
           <div className="flex justify-between mb-1">
-            <span>Subtotal:</span>
-            <span>${((total || 0) + (discount || 0)).toFixed(2)}</span>
+            <span>{isRestaurant ? t('receipt.subtotal') : 'Subtotal'}:</span>
+            <span>{formatCurrency((Number(total) || 0) + (Number(discount) || 0))}</span>
           </div>
           {(discount || 0) > 0 && (
             <div className="flex justify-between mb-1">
-              <span>Discount:</span>
-              <span>-${(discount || 0).toFixed(2)}</span>
+              <span>{isRestaurant ? 'လျှော့စျေး' : 'Discount'}:</span>
+              <span>-{formatCurrency(Number(discount) || 0)}</span>
             </div>
           )}
           <div className="flex justify-between font-bold">
-            <span>Total:</span>
-            <span>${(total || 0).toFixed(2)}</span>
+            <span>{isRestaurant ? t('receipt.grandTotal') : 'Total'}:</span>
+            <span>{formatCurrency(Number(total) || 0)}</span>
           </div>
         </div>
       </div>
@@ -150,19 +160,19 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptTemplateProps>(
       {/* Payment Method */}
       <div className="mb-4 text-xs">
         <div className="flex justify-between">
-          <span>Payment:</span>
-          <span>{paymentMethod}</span>
+          <span>{isRestaurant ? t('receipt.payment') : 'Payment'}:</span>
+          <span>{isRestaurant ? t(`receipt.${paymentMethod}`) : paymentMethod}</span>
         </div>
         {paymentMethod === 'cash' && amountGiven !== undefined && amountGiven > 0 && (
           <>
             <div className="flex justify-between mt-1">
-              <span>Amount Given:</span>
-              <span>${amountGiven.toFixed(2)}</span>
+              <span>{isRestaurant ? t('receipt.amountGiven') : 'Amount Given'}:</span>
+              <span>{formatCurrency(Number(amountGiven) || 0)}</span>
             </div>
             {change !== undefined && change > 0 && (
               <div className="flex justify-between mt-1 font-bold">
-                <span>Change:</span>
-                <span>${change.toFixed(2)}</span>
+                <span>{isRestaurant ? t('receipt.change') : 'Change'}:</span>
+                <span>{formatCurrency(Number(change) || 0)}</span>
               </div>
             )}
           </>
@@ -174,8 +184,8 @@ export const ReceiptTemplate = forwardRef<HTMLDivElement, ReceiptTemplateProps>(
 
       {/* Footer */}
       <div className="text-center text-xs mt-4">
-        <p>Thank you for your purchase!</p>
-        <p className="mt-1">Please come again</p>
+        <p>{isRestaurant ? t('receipt.thankYou') : 'Thank you for your purchase!'}</p>
+        <p className="mt-1">{isRestaurant ? t('receipt.comeAgain') : 'Please come again'}</p>
       </div>
 
       <style>{`

@@ -48,6 +48,8 @@ export const sales = sqliteTable("sales", {
   date: integer("date", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   customerId: text("customer_id").references(() => customers.id),
   staffId: text("staff_id").references(() => staff.id),
+  requestedDeliveryTime: text("requested_delivery_time"),
+  status: text("status").default("pending"),
 });
 
 // Sale Items
@@ -139,6 +141,7 @@ export const appSettings = sqliteTable("app_settings", {
   lowStockThreshold: integer("low_stock_threshold").default(5),
   enableLocalAi: integer("enable_local_ai", { mode: "boolean" }).notNull().default(false),
   localAiUrl: text("local_ai_url"),
+  deliveryRiderPin: text("delivery_rider_pin").default("8888"),
 });
 
 // Alerts
@@ -157,6 +160,7 @@ export const insertExpenseSchema = createInsertSchema(expenses);
 export const insertInventoryLogSchema = createInsertSchema(inventoryLogs);
 export const insertCreditLedgerSchema = createInsertSchema(creditLedger);
 export const insertAttendanceSchema = createInsertSchema(attendance);
+export const appSettingsSchema = createInsertSchema(appSettings);
 
 export const insertSaleItemSchema = createInsertSchema(saleItems).omit({ id: true, saleId: true });
 export const insertSaleSchema = createInsertSchema(sales).extend({

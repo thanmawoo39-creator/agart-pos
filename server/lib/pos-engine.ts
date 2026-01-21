@@ -23,7 +23,7 @@ export async function getSalesSummary() {
         const [res] = await db
         .select({ total: sum(schema.creditLedger.amount) })
         .from(schema.creditLedger)
-        .where(eq(schema.creditLedger.type, 'charge'));
+        .where(eq(schema.creditLedger.type, 'sale'));
         receivables = Number(res?.total || 0);
     } catch (e) { console.log("Ledger calculation skipped due to schema mismatch"); }
 

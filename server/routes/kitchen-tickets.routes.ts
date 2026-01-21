@@ -109,4 +109,62 @@ router.patch("/:id/status", isAuthenticated, async (req, res) => {
     }
 });
 
+// Generic PATCH endpoint for Kanban workflow (supports timestamps)
+router.patch("/:id", isAuthenticated, async (req, res) => {
+    try {
+        const businessUnitId = getScopedBusinessUnitId(req, res);
+        if (!businessUnitId) return;
+
+        const existing = await storage.getKitchenTickets(businessUnitId);
+        const ticket = existing.find((t: any) => t.id === req.params.id);
+        if (!ticket) {
+            return res.status(404).json({ error: "Kitchen ticket not found" });
+        }
+
+        // Extract updates from body
+        const updates: any = { updatedAt: new Date().toISOString() };
+
+        if (req.body.status) updates.status = req.body.status;
+        if (req.body.startedAt !== undefined) updates.startedAt = req.body.startedAt;
+        if (req.body.readyAt !== undefined) updates.readyAt = req.body.readyAt;
+        if (req.body.servedAt !== undefined) updates.servedAt = req.body.servedAt;
+
+        // Update ticket in database
+        const { db } = await import("../lib/db");
+        const { kitchenTickets } = await import("../../shared/schema");
+        const { eq } = await import("drizzle-orm");
+
+        const [updated] = await db.update(kitchenTickets)
+            .set(updates)
+            .where(eq(kitchenTickets.id, req.params.id))
+            .returning();
+
+        // Emit Socket.IO event for real-time POS sync
+        const io = (global as any).io;
+        if (io) {
+            // Determine readable status for notification
+            let readableStatus = "updated";
+            if (updates.startedAt) readableStatus = "cooking";
+            else if (updates.status === "ready") readableStatus = "ready";
+            else if (updates.status === "served") readableStatus = "served";
+
+            io.emit("kitchenOrderStatusChanged", {
+                tableId: ticket.tableId,
+                tableNumber: ticket.tableNumber,
+                businessUnitId,
+                status: readableStatus,
+                ticketId: req.params.id,
+                timestamp: new Date().toISOString(),
+            });
+
+            console.log(`[SOCKET] Emitted kitchenOrderStatusChanged: Table ${ticket.tableNumber} → ${readableStatus}`);
+        }
+
+        res.json(updated);
+    } catch (error) {
+        console.error("Error updating kitchen ticket:", error);
+        res.status(500).json({ error: "Failed to update kitchen ticket" });
+    }
+});
+
 export default router;

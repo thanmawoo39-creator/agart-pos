@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCurrency } from "@/hooks/use-currency";
 
 type DebtSummaryTableProps = {
   debtors: Customer[];
@@ -22,13 +23,6 @@ type DebtSummaryTableProps = {
   onSelectCustomer: (customer: Customer) => void;
 };
 
-const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
-  };
-
 export function DebtSummaryTable({
   debtors,
   repaymentAmounts,
@@ -38,6 +32,7 @@ export function DebtSummaryTable({
   onRepay,
   onSelectCustomer,
 }: DebtSummaryTableProps) {
+  const { formatCurrency } = useCurrency();
   return (
     <Table>
       <TableHeader>

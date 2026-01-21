@@ -1,29 +1,75 @@
 {
-  "name": "Agart POS",
-  "short_name": "Agart POS",
-  "description": "Professional cloud-based point of sale and inventory management system for retail businesses",
+  "name": "AgartPOS - Catering & Delivery",
+  "short_name": "AgartPOS",
+  "description": "Point of Sale system for restaurants and catering",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#4f46e5",
-  "orientation": "portrait-primary",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "any",
   "scope": "/",
+  "id": "/",
   "icons": [
     {
-      "src": "/favicon.png",
+      "src": "/icons/icon-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/favicon.png",
+      "src": "/icons/icon-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     }
   ],
-  "categories": ["business", "productivity", "utilities"],
+  "categories": [
+    "food",
+    "business",
+    "productivity"
+  ],
   "lang": "en",
   "dir": "ltr",
-  "prefer_related_applications": false
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Order Manager",
+      "short_name": "Orders",
+      "description": "Manage catering and delivery orders",
+      "url": "/catering/orders",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Kitchen View",
+      "short_name": "Kitchen",
+      "description": "Real-time kitchen order display",
+      "url": "/kitchen",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "screenshots": [],
+  "related_applications": [],
+  "handle_links": "preferred",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "launch_handler": {
+    "client_mode": [
+      "navigate-existing",
+      "auto"
+    ]
+  }
 }

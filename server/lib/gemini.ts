@@ -46,7 +46,7 @@ export async function callGeminiVisionAPI(imageBuffer: Buffer, mimeType: string,
 
       const result = await model.generateContent([prompt, imagePart]);
       const response = result.response.text();
-      
+
       console.log('Gemini grocery identification response:', response);
 
       // Parse JSON response
@@ -100,7 +100,7 @@ export async function callGeminiVisionAPI(imageBuffer: Buffer, mimeType: string,
       }
     }
   }
-  
+
   // If all retries fail, return a failure response
   return {
     success: false,
@@ -169,7 +169,7 @@ Rules:
 
     const result = await model.generateContent([prompt, imagePart]);
     const response = result.response.text();
-    
+
     console.log('Gemini payment verification response:', response);
 
     // Parse JSON response
@@ -231,37 +231,49 @@ export async function askGeminiAboutBusiness(
     ? contextData.topProducts.map(p => `${p.name} (${formatMMK(p.revenue)})`).join(', ')
     : 'No sales data yet';
 
-  const systemPrompt = `You are a helpful Store Manager/CFO powered by AI for a retail shop in Myanmar.
-You have access to real-time business data and provide actionable insights based on actual numbers.
+  const systemPrompt = `သင်သည် မြန်မာနိုင်ငံရှိ ကုန်စုံဆိုင်အတွက် ကျွမ်းကျင်သော CFO နှင့် စီးပွားရေးအကြံပေးပုဂ္ဂိုလ် ဖြစ်ပါသည်။
+သင့်တွင် လက်ရှိ စီးပွားရေးဒေတာများကို ရယူနိုင်ပြီး တကယ့်ဂဏန်းများအပေါ် အခြေခံသော လက်တွေ့အသုံးဝင်သည့် အကြံဉာဏ်များကို ပေးပါသည်။
 
-CURRENT BUSINESS STATUS (Real-Time Data):
+လက်ရှိ စီးပွားရေးအခြေအနေ (Real-Time Data):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 TODAY'S PERFORMANCE:
-   • Sales: ${formatMMK(contextData.todaySales)} (${contextData.todayTransactionCount} transactions)
-   • Expenses: ${formatMMK(contextData.todayExpenses)}
-   • Net Profit Today: ${formatMMK(contextData.todaySales - contextData.todayExpenses)}
+📊 ယနေ့ စွမ်းဆောင်ရည်:
+   • ရောင်းရငွေ: ${formatMMK(contextData.todaySales)} (${contextData.todayTransactionCount} ကြိမ်)
+   • ကုန်ကျစရိတ်: ${formatMMK(contextData.todayExpenses)}
+   • ယနေ့ အသားတင်အမြတ်: ${formatMMK(contextData.todaySales - contextData.todayExpenses)}
 
-💰 FINANCIAL OVERVIEW:
-   • Total Revenue (All-Time): ${formatMMK(contextData.totalRevenue)}
-   • Credit Owed by Customers: ${formatMMK(contextData.creditOwed)}
+💰 ငွေကြေးခြုံငုံသုံးသပ်ချက်:
+   • စုစုပေါင်းဝင်ငွေ (အားလုံး): ${formatMMK(contextData.totalRevenue)}
+   • ဖောက်သည်များထံမှ ရရန်ကြွေး: ${formatMMK(contextData.creditOwed)}
 
-📦 INVENTORY ALERTS:
-   • Low Stock Items: ${lowStockWarning}
+📦 ကုန်ပစ္စည်းသတိပေးချက်:
+   • ကုန်နည်းနေသောပစ္စည်းများ: ${lowStockWarning}
 
-🏆 TOP SELLING PRODUCTS:
+🏆 အရောင်းရဆုံး ပစ္စည်းများ:
    ${topProductsStr}
 
-👥 CUSTOMER BASE:
-   • Total Active Customers: ${contextData.totalCustomers}
+👥 ဖောက်သည်များ:
+   • စုစုပေါင်းဖောက်သည်အရေအတွက်: ${contextData.totalCustomers}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-INSTRUCTIONS:
-- Answer questions based on the REAL DATA above, not generic advice
-- Be specific with numbers and actionable recommendations
-- If asked "How is business?", cite actual sales figures
-- Respond in the language of the user's question (English or Myanmar)
-- Keep responses concise (2-4 sentences) but data-driven`;
+အရေးကြီးညွှန်ကြားချက်များ (CRITICAL RULES):
+
+1. ဘာသာစကား (STRICT LANGUAGE RULE):
+   - သင်သည် မြန်မာဘာသာဖြင့်သာ အဖြေပေးရမည်။
+   - အင်္ဂလိပ်စာကြောင်းများကို လုံးဝမသုံးပါနှင့်။
+   - ပစ္စည်းအမည်များ (ဥပမာ: "Fresh Apples", "Milk") ကို အင်္ဂလိပ်လိုထားခဲ့နိုင်သော်လည်း စာကြောင်းဖွဲ့စည်းပုံနှင့် အကြံဉာဏ်များကိုမူ မြန်မာဘာသာဖြင့်သာ ရေးပါ။
+
+   မှားသောပုံစံ: "You should stock 10 units of Milk."
+   မှန်သောပုံစံ: "Milk (၁၀) ဗူးကို ထပ်မံဖြည့်တင်းသင့်ပါသည်။"
+
+2. ဒေတာအသုံးပြုမှု:
+   - အထက်ပါ တကယ့်ဒေတာများကိုသာ အခြေခံ၍ ဖြေကြားပါ
+   - ကိန်းဂဏန်းများနှင့် တိကျသော အကြံပြုချက်များပေးပါ
+   - "စီးပွားရေးဘယ်လိုလဲ" ဟုမေးလျှင် တကယ့်ရောင်းရငွေပမာဏကို ကိုးကားပါ
+
+3. လေသံ: ကျွမ်းကျင်မှု၊ အားပေးမှုနှင့် ရှင်းလင်းမှုရှိစေရန် ရေးသားပါ
+
+4. အတိုချုံး (၂-၄ ကြောင်း) ဖြေဆိုပါ`;
 
   // Use failover system (Groq → Gemini → Fallback)
   const result = await generateWithFailover(systemPrompt, prompt, {
@@ -296,37 +308,49 @@ export async function askGeminiAboutBusinessStreaming(
     ? contextData.topProducts.map(p => `${p.name} (${formatMMK(p.revenue)})`).join(', ')
     : 'No sales data yet';
 
-  const systemPrompt = `You are a helpful Store Manager/CFO powered by AI for a retail shop in Myanmar.
-You have access to real-time business data and provide actionable insights based on actual numbers.
+  const systemPrompt = `သင်သည် မြန်မာနိုင်ငံရှိ ကုန်စုံဆိုင်အတွက် ကျွမ်းကျင်သော CFO နှင့် စီးပွားရေးအကြံပေးပုဂ္ဂိုလ် ဖြစ်ပါသည်။
+သင့်တွင် လက်ရှိ စီးပွားရေးဒေတာများကို ရယူနိုင်ပြီး တကယ့်ဂဏန်းများအပေါ် အခြေခံသော လက်တွေ့အသုံးဝင်သည့် အကြံဉာဏ်များကို ပေးပါသည်။
 
-CURRENT BUSINESS STATUS (Real-Time Data):
+လက်ရှိ စီးပွားရေးအခြေအနေ (Real-Time Data):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 TODAY'S PERFORMANCE:
-   • Sales: ${formatMMK(contextData.todaySales)} (${contextData.todayTransactionCount} transactions)
-   • Expenses: ${formatMMK(contextData.todayExpenses)}
-   • Net Profit Today: ${formatMMK(contextData.todaySales - contextData.todayExpenses)}
+📊 ယနေ့ စွမ်းဆောင်ရည်:
+   • ရောင်းရငွေ: ${formatMMK(contextData.todaySales)} (${contextData.todayTransactionCount} ကြိမ်)
+   • ကုန်ကျစရိတ်: ${formatMMK(contextData.todayExpenses)}
+   • ယနေ့ အသားတင်အမြတ်: ${formatMMK(contextData.todaySales - contextData.todayExpenses)}
 
-💰 FINANCIAL OVERVIEW:
-   • Total Revenue (All-Time): ${formatMMK(contextData.totalRevenue)}
-   • Credit Owed by Customers: ${formatMMK(contextData.creditOwed)}
+💰 ငွေကြေးခြုံငုံသုံးသပ်ချက်:
+   • စုစုပေါင်းဝင်ငွေ (အားလုံး): ${formatMMK(contextData.totalRevenue)}
+   • ဖောက်သည်များထံမှ ရရန်ကြွေး: ${formatMMK(contextData.creditOwed)}
 
-📦 INVENTORY ALERTS:
-   • Low Stock Items: ${lowStockWarning}
+📦 ကုန်ပစ္စည်းသတိပေးချက်:
+   • ကုန်နည်းနေသောပစ္စည်းများ: ${lowStockWarning}
 
-🏆 TOP SELLING PRODUCTS:
+🏆 အရောင်းရဆုံး ပစ္စည်းများ:
    ${topProductsStr}
 
-👥 CUSTOMER BASE:
-   • Total Active Customers: ${contextData.totalCustomers}
+👥 ဖောက်သည်များ:
+   • စုစုပေါင်းဖောက်သည်အရေအတွက်: ${contextData.totalCustomers}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-INSTRUCTIONS:
-- Answer questions based on the REAL DATA above, not generic advice
-- Be specific with numbers and actionable recommendations
-- If asked "How is business?", cite actual sales figures
-- Respond in the language of the user's question (English or Myanmar)
-- Keep responses concise (2-4 sentences) but data-driven`;
+အရေးကြီးညွှန်ကြားချက်များ (CRITICAL RULES):
+
+1. ဘာသာစကား (STRICT LANGUAGE RULE):
+   - သင်သည် မြန်မာဘာသာဖြင့်သာ အဖြေပေးရမည်။
+   - အင်္ဂလိပ်စာကြောင်းများကို လုံးဝမသုံးပါနှင့်။
+   - ပစ္စည်းအမည်များ (ဥပမာ: "Fresh Apples", "Milk") ကို အင်္ဂလိပ်လိုထားခဲ့နိုင်သော်လည်း စာကြောင်းဖွဲ့စည်းပုံနှင့် အကြံဉာဏ်များကိုမူ မြန်မာဘာသာဖြင့်သာ ရေးပါ။
+
+   မှားသောပုံစံ: "You should stock 10 units of Milk."
+   မှန်သောပုံစံ: "Milk (၁၀) ဗူးကို ထပ်မံဖြည့်တင်းသင့်ပါသည်။"
+
+2. ဒေတာအသုံးပြုမှု:
+   - အထက်ပါ တကယ့်ဒေတာများကိုသာ အခြေခံ၍ ဖြေကြားပါ
+   - ကိန်းဂဏန်းများနှင့် တိကျသော အကြံပြုချက်များပေးပါ
+   - "စီးပွားရေးဘယ်လိုလဲ" ဟုမေးလျှင် တကယ့်ရောင်းရငွေပမာဏကို ကိုးကားပါ
+
+3. လေသံ: ကျွမ်းကျင်မှု၊ အားပေးမှုနှင့် ရှင်းလင်းမှုရှိစေရန် ရေးသားပါ
+
+4. အတိုချုံး (၂-၄ ကြောင်း) ဖြေဆိုပါ`;
 
   const userPrompt = `User Question: ${prompt}`;
 
@@ -356,6 +380,102 @@ Focus on key trends, anomalies, and strategic recommendations.`;
   return result.content;
 }
 
+// AI System Doctor - Analyze business & system health with AI
+export interface SystemHealthLogs {
+  isOnline: boolean;
+  dbLatency: string;
+  dbHealthy: boolean;
+  localStorageUsedMB: number;
+  localStorageQuotaMB: number;
+  pageLoadTimeMs: number;
+  userAgent: string;
+  timestamp: string;
+  errors?: string[];
+}
+
+export interface BusinessHealthData {
+  todaySales: number;
+  totalExpenses: number;
+  netProfit: number;
+  lowStockCount: number;
+  lowStockItems: string[];
+  guestOrderPercent?: number; // percent of orders from guests
+}
+
+export interface SystemDiagnosis {
+  status: 'healthy' | 'warning' | 'critical';
+  message: string; // Business Insights (Burmese)
+  fix: string;    // Technical/Business Action Items
+}
+
+export async function analyzeSystemHealth(
+  systemLogs: SystemHealthLogs,
+  businessData?: BusinessHealthData
+): Promise<SystemDiagnosis> {
+  const systemPrompt = `သင်သည် AgartPOS ၏ Virtual CFO နှင့် System Administrator ဖြစ်ပါသည်။
+သင့်တာဝန်မှာ လုပ်ငန်း၏ ငွေကြေးအခြေအနေနှင့် နည်းပညာပိုင်းဆိုင်ရာ ကျန်းမာရေးကို သုံးသပ်ပေးရန် ဖြစ်သည်။
+
+ပေးပို့သော အချက်အလက်များကို သုံးသပ်ပြီး မြန်မာဘာသာဖြင့် အနှစ်ချုပ် အကြံဉာဏ်ပေးပါ။
+
+Output Format (JSON Only):
+{
+  "status": "healthy" | "warning" | "critical",
+  "message": "စီးပွားရေးနှင့် စနစ်ပိုင်းဆိုင်ရာ သုံးသပ်ချက် (မြန်မာလို)",
+  "fix": "ချက်ချင်းလုပ်ဆောင်သင့်သော အချက်များ (မြန်မာလို သို့မဟုတ် English technical terms)"
+}
+
+Status Rules:
+- healthy: Sales > 0, Profit > 0, No Errors
+- warning: High Latency, Low Stock, or Low Sales
+- critical: Offline, DB Errors, or Critical Expenses > Sales
+
+Tone: Professional, Encouraging, Strategic.
+
+Guest Insights:
+If guestOrderPercent > 20%, suggest strategies to convert guests to members (e.g., offering discounts for signups).`;
+
+  const userPrompt = `
+📊 BUSINESS DATA:
+${businessData ? JSON.stringify(businessData, null, 2) : "No business data available."}
+
+🛠 SYSTEM LOGS:
+${JSON.stringify(systemLogs, null, 2)}
+
+Please provide a 360-degree analysis. If sales are 0, suggesting checking if the shop is open or marketing is needed. If system has high latency, suggest checking internet.`;
+
+  try {
+    const result = await generateWithFailover(systemPrompt, userPrompt, {
+      preferredProvider: 'groq',
+      preferredModel: 'llama-3.3-70b-versatile',
+    });
+
+    // Parse JSON from response
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as SystemDiagnosis;
+      return {
+        status: parsed.status || 'warning',
+        message: parsed.message || 'စနစ်အခြေအနေကို စစ်ဆေးလို့မရပါ။',
+        fix: parsed.fix || 'စာမျက်နှာကို refresh လုပ်ပြီး ထပ်ကြိုးစားပါ။',
+      };
+    }
+
+    // Fallback if JSON parsing fails
+    return {
+      status: 'warning',
+      message: 'AI တုံ့ပြန်ချက်ကို ဖတ်ရှုလို့မရပါ။',
+      fix: 'Try running the diagnosis again.',
+    };
+  } catch (error) {
+    console.error('[AI-SYSTEM-DOCTOR] Error:', error);
+    return {
+      status: 'critical',
+      message: 'AI ဆက်သွယ်မှု မအောင်မြင်ပါ။',
+      fix: 'Check if Gemini or Groq API key is configured in Settings.',
+    };
+  }
+}
+
 // Helper function to format currency
 function formatMMK(amount: number): string {
   return new Intl.NumberFormat('my-MM', {
@@ -364,6 +484,84 @@ function formatMMK(amount: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+/**
+ * Translate menu item name to Burmese using Gemini AI
+ * Used for automatic product name translation during creation/update
+ *
+ * @param text - The English product/menu item name to translate
+ * @returns The Burmese translation, or original text if translation fails
+ */
+export async function translateToBurmese(text: string): Promise<string> {
+  // Skip translation for empty or very short strings
+  if (!text || text.trim().length < 2) {
+    return text;
+  }
+
+  // Skip if text already contains Burmese characters (Unicode range: U+1000-U+109F)
+  const burmeseRegex = /[\u1000-\u109F]/;
+  if (burmeseRegex.test(text)) {
+    console.log('[Translation] Text already contains Burmese, skipping:', text);
+    return text;
+  }
+
+  try {
+    // Check if API key is configured
+    if (!(await hasGeminiApiKey())) {
+      console.warn('[Translation] Gemini API key not configured, returning original text');
+      return text;
+    }
+
+    const genAI = await getGeminiAI();
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3-flash',
+      generationConfig: {
+        temperature: 0.0, // Maximum consistency for translations
+        maxOutputTokens: 20, // Prevent long-winded responses
+      }
+    });
+
+    const prompt = `System: You are a professional menu translator.
+
+Task: Translate to Burmese.
+
+Constraint: Return ONLY the Burmese characters. No quotes. No English. No explanations.
+
+Input: "${text}"`;
+
+    const result = await model.generateContent(prompt);
+    let translation = result.response.text().trim();
+
+    // Post-processing: Remove any accidental quotes
+    translation = translation.replace(/["'""'']/g, "").trim();
+
+    // Validate that we got a reasonable response
+    if (!translation || translation.length === 0) {
+      console.warn('[Translation] Empty response from Gemini, returning original');
+      return text;
+    }
+
+    // Check if the response contains Burmese characters
+    if (!burmeseRegex.test(translation)) {
+      console.warn('[Translation] Response does not contain Burmese characters:', translation);
+      return text;
+    }
+
+    console.log(`[Translation] "${text}" → "${translation}"`);
+    return translation;
+
+  } catch (error: any) {
+    // Handle rate limiting gracefully
+    if (error.message?.includes('429') || error.message?.includes('Too Many Requests')) {
+      console.warn('[Translation] Rate limited, returning original text:', text);
+      return text;
+    }
+
+    // Handle other errors
+    console.error('[Translation] Error translating to Burmese:', error.message || error);
+    return text;
+  }
 }
 
 // Export additional utility functions if needed

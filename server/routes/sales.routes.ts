@@ -1,53 +1,70 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { saleSchema, type Attendance } from "../../shared/schema";
-import { isAuthenticated, requireRole } from '../middleware/auth';
+import { isAuthenticated, requireRole, validateBusinessUnitAccess } from '../middleware/auth';
+import { db } from '../db';
+import { sales } from '../../shared/schema';
+import { eq, and } from 'drizzle-orm';
 
 const router = Router();
 
-const getScopedBusinessUnitId = (req: any, res: any): string | null => {
-  const businessUnitId = typeof req.query?.businessUnitId === 'string' ? req.query.businessUnitId : '';
-  if (!businessUnitId) {
-    res.status(400).json({ error: 'businessUnitId is required' });
-    return null;
-  }
-
-  const userBusinessUnitId = req.user?.businessUnitId;
-  const userRole = req.user?.role;
-  if (userRole !== 'owner') {
-    if (!userBusinessUnitId) {
-      res.status(403).json({ error: 'User has no assigned business unit' });
-      return null;
-    }
-    if (businessUnitId !== userBusinessUnitId) {
-      res.status(403).json({ error: 'Business unit mismatch' });
-      return null;
-    }
-  }
-
-  return businessUnitId;
-};
+/**
+ * @openapi
+ * tags:
+ *   - name: Sales
+ *     description: Sales operations
+ */
 
 router.get("/", isAuthenticated, requireRole('owner', 'manager', 'cashier'), async (req, res) => {
+  /**
+   * @openapi
+   * /api/sales:
+   *   get:
+   *     tags: [Sales]
+   *     summary: List sales for the active business unit
+   *     parameters:
+   *       - in: query
+   *         name: businessUnitId
+   *         schema:
+   *           type: string
+   *       - in: query
+   *         name: date
+   *         schema:
+   *           type: string
+   *       - in: query
+   *         name: startDate
+   *         schema:
+   *           type: string
+   *       - in: query
+   *         name: endDate
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Array of sales
+   */
   try {
     const { date, startDate, endDate } = req.query;
-    const businessUnitId = getScopedBusinessUnitId(req, res);
-    if (!businessUnitId) return;
+    const validation = validateBusinessUnitAccess(req, { allowBody: false });
+    if (validation.error) {
+      return res.status(validation.error.status).json({ error: validation.error.message });
+    }
+    const businessUnitId = validation.businessUnitId!;
 
     const sales = await storage.getSales();
     let filteredSales = sales;
 
-    filteredSales = sales.filter((sale: any) => (sale?.businessUnitId || null) === businessUnitId);
+    filteredSales = sales.filter((sale) => sale.businessUnitId === businessUnitId);
 
     if (date) {
-      filteredSales = filteredSales.filter((sale: any) => new Date(sale.timestamp).toISOString().split('T')[0] === date);
+      filteredSales = filteredSales.filter((sale) => new Date(sale.timestamp).toISOString().split('T')[0] === date);
     } else if (startDate && endDate) {
-      filteredSales = filteredSales.filter((sale: any) => {
+      filteredSales = filteredSales.filter((sale) => {
         const saleDate = new Date(sale.timestamp).toISOString().split('T')[0];
         return saleDate >= (startDate as string) && saleDate <= (endDate as string);
       });
     }
-    filteredSales.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    filteredSales.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     res.json(filteredSales);
   } catch (error) {
     console.error('Error fetching sales:', error);
@@ -56,14 +73,35 @@ router.get("/", isAuthenticated, requireRole('owner', 'manager', 'cashier'), asy
 });
 
 router.get("/:id", isAuthenticated, requireRole('owner', 'manager', 'cashier'), async (req, res) => {
+  /**
+   * @openapi
+   * /api/sales/{id}:
+   *   get:
+   *     tags: [Sales]
+   *     summary: Get a sale by ID
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Sale
+   *       404:
+   *         description: Not found
+   */
   try {
-    const businessUnitId = getScopedBusinessUnitId(req, res);
-    if (!businessUnitId) return;
+    const validation = validateBusinessUnitAccess(req, { allowBody: false });
+    if (validation.error) {
+      return res.status(validation.error.status).json({ error: validation.error.message });
+    }
+    const businessUnitId = validation.businessUnitId!;
 
     const sale = await storage.getSale(req.params.id);
     if (!sale) return res.status(404).json({ error: "Sale not found" });
 
-    if ((sale as any)?.businessUnitId !== businessUnitId) {
+    if (sale.businessUnitId !== businessUnitId) {
       return res.status(404).json({ error: "Sale not found" });
     }
 
@@ -76,6 +114,24 @@ router.get("/:id", isAuthenticated, requireRole('owner', 'manager', 'cashier'), 
 
 // POST /api/sales - Non-Blocking Sale Creation with Fail-Safe Shift Update
 router.post("/", isAuthenticated, requireRole('owner', 'manager', 'cashier'), async (req, res) => {
+  /**
+   * @openapi
+   * /api/sales:
+   *   post:
+   *     tags: [Sales]
+   *     summary: Create a sale
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *     responses:
+   *       200:
+   *         description: Sale created
+   *       400:
+   *         description: Validation error
+   */
   try {
     // Helper function to ensure numbers are valid
     const safeNumber = (value: any): number => {
@@ -224,6 +280,157 @@ router.post("/", isAuthenticated, requireRole('owner', 'manager', 'cashier'), as
   } catch (error) {
     console.error("[SALE-CREATE-ERROR] Fatal error creating sale:", error);
     res.status(500).json({ error: "Failed to create sale" });
+  }
+});
+
+// POST /api/sales/finalize - Restricted endpoint for payment processing (cashiers only)
+router.post("/finalize", isAuthenticated, async (req, res) => {
+  try {
+    // Check user role - only cashiers can finalize sales
+    const userRole = req.user?.role;
+    if (userRole !== 'cashier' && userRole !== 'owner' && userRole !== 'manager') {
+      return res.status(403).json({ error: "Permission denied. Only cashiers can finalize sales." });
+    }
+
+    console.log('[SALE-FINALIZE] Starting sale finalization by user:', userRole);
+
+    const currentShift = await storage.getCurrentShift();
+    const businessUnitId = req.body?.businessUnitId || currentShift?.businessUnitId;
+    if (!businessUnitId) {
+      return res.status(400).json({ error: "Business unit ID is required for sales." });
+    }
+
+    const normalizedBody = {
+      ...(req.body || {}),
+      businessUnitId,
+      subtotal: req.body?.subtotal ?? req.body?.total ?? 0,
+      tax: req.body?.tax ?? 0,
+      discount: req.body?.discount ?? 0,
+      paymentStatus: req.body?.paymentStatus ?? 'paid',
+      timestamp: req.body?.timestamp ?? new Date().toISOString(),
+    };
+
+    const parsed = saleSchema.omit({ id: true }).safeParse(normalizedBody);
+    if (!parsed.success) {
+      console.error('[SALE-FINALIZE] Validation failed:', parsed.error.errors);
+      return res.status(400).json({ error: "Invalid sale data", details: parsed.error.errors });
+    }
+
+    console.log('[SALE-FINALIZE] Calling storage.createSale...');
+    const sale = await storage.createSale(parsed.data);
+    console.log('[SALE-FINALIZE] Sale finalized:', sale.id);
+
+    // CRITICAL: Clear table status if this is a restaurant table order
+    if (sale.storeId) {
+      try {
+        const tableId = sale.storeId;
+        console.log('[SALE-FINALIZE] ============================================');
+        console.log('[SALE-FINALIZE] Clearing table status for tableId:', tableId);
+        console.log('[SALE-FINALIZE] storeId type:', typeof tableId);
+        console.log('[SALE-FINALIZE] storeId value:', tableId);
+
+        // Fetch the table record to get its number for Socket.IO events
+        const allTables = await storage.getTables();
+        const tableRecord = allTables.find(t => t.id === tableId);
+
+        if (!tableRecord) {
+          console.error('[SALE-FINALIZE] ❌ Table not found with ID:', tableId);
+          console.error('[SALE-FINALIZE] Available table IDs:', allTables.map(t => t.id).join(', '));
+        } else {
+          console.log('[SALE-FINALIZE] ✓ Found table:', tableRecord.number, '(ID:', tableRecord.id, ')');
+
+          // Clear table order and set status to available
+          const updatedOrder = await storage.updateTableOrder(tableId, null);
+          console.log('[SALE-FINALIZE] ✓ Table order cleared:', updatedOrder?.id);
+
+          const updatedStatus = await storage.updateTableStatus(tableId, 'available');
+          console.log('[SALE-FINALIZE] ✓ Table status updated to available:', updatedStatus?.status);
+          // CRITICAL: Mark all old unpaid sales for this table as paid
+          try {
+            const tableNumber = tableRecord.number;
+            const updateResult = await db.update(sales)
+              .set({ paymentStatus: 'paid', timestamp: new Date().toISOString() })
+              .where(and(eq(sales.tableNumber, tableNumber), eq(sales.paymentStatus, 'unpaid')))
+              .returning();
+            if (updateResult.length > 0) {
+              console.log('[SALE-FINALIZE] ✓ Cleared', updateResult.length, 'old unpaid sales for table', tableNumber);
+            }
+          } catch (e) {
+            console.error('[SALE-FINALIZE] Failed to clear old sales:', e);
+          }
+          // Emit Socket.IO events for real-time UI updates
+          const io = (global as any).io;
+          if (io) {
+            const eventData = {
+              tableId: tableRecord.id,
+              tableNumber: tableRecord.number,
+              status: 'available',
+              businessUnitId,
+              timestamp: new Date().toISOString()
+            };
+
+            io.emit('tableStatusUpdated', eventData);
+            io.emit('tableOrderCleared', eventData);
+
+            console.log('[SALE-FINALIZE] ✓ Socket.IO events emitted for Table', tableRecord.number);
+            console.log('[SALE-FINALIZE] Event data:', JSON.stringify(eventData, null, 2));
+          } else {
+            console.warn('[SALE-FINALIZE] ⚠️  Socket.IO not available');
+          }
+        }
+
+        console.log('[SALE-FINALIZE] ============================================');
+      } catch (tableError) {
+        console.error('[SALE-FINALIZE] ❌ Failed to clear table status:', tableError);
+        console.error('[SALE-FINALIZE] Error details:', tableError instanceof Error ? tableError.message : 'Unknown error');
+        console.error('[SALE-FINALIZE] Stack:', tableError instanceof Error ? tableError.stack : 'N/A');
+        // Don't fail the sale if table clearing fails
+      }
+    } else {
+      console.log('[SALE-FINALIZE] No storeId in sale - skipping table clear');
+    }
+
+    // Try to update shift totals (NON-BLOCKING / FAIL-SAFE)
+    try {
+      const currentShift = await storage.getCurrentShift();
+      if (currentShift && currentShift.isActive && currentShift.attendanceId) {
+        const allAttendance = await storage.getAttendance();
+        const currentAttendance = allAttendance.find(a => a.id === currentShift.attendanceId);
+
+        if (currentAttendance) {
+          const safeNumber = (value: any): number => {
+            const num = typeof value === 'number' ? value : parseFloat(value);
+            return !isNaN(num) && isFinite(num) ? num : 0;
+          };
+
+          const saleTotal = safeNumber(parsed.data.total);
+          const currentTotalSales = safeNumber(currentAttendance.totalSales);
+          const currentCashSales = safeNumber(currentAttendance.cashSales);
+          const currentCardSales = safeNumber(currentAttendance.cardSales);
+          const currentCreditSales = safeNumber(currentAttendance.creditSales);
+          const currentMobileSales = safeNumber(currentAttendance.mobileSales);
+
+          // Update shift totals with new sale
+          const updatedAttendance = await storage.updateAttendance(currentShift.attendanceId, {
+            totalSales: currentTotalSales + saleTotal,
+            cashSales: currentCashSales + (parsed.data.paymentMethod === 'cash' ? saleTotal : 0),
+            cardSales: currentCardSales + (parsed.data.paymentMethod === 'card' ? saleTotal : 0),
+            creditSales: currentCreditSales + (parsed.data.paymentMethod === 'credit' ? saleTotal : 0),
+            mobileSales: currentMobileSales + (parsed.data.paymentMethod === 'mobile' ? saleTotal : 0),
+          });
+
+          console.log('[SALE-FINALIZE] Updated shift totals:', updatedAttendance);
+        }
+      }
+    } catch (error) {
+      console.error('[SALE-FINALIZE] Shift update error:', error);
+      // Don't fail the sale if shift update fails
+    }
+
+    res.status(201).json(sale);
+  } catch (error) {
+    console.error('[SALE-FINALIZE] Sale finalization error:', error);
+    res.status(500).json({ error: "Failed to finalize sale" });
   }
 });
 

@@ -72,9 +72,9 @@ export async function analyzeCustomerRisk(customerId: string): Promise<RiskAnaly
   const riskFactors: string[] = [];
   let daysSinceLastPayment: number | null = null;
 
-  // Find last payment
+  // Find last repayment
   const payments = customerLedger
-    .filter((e) => e.type === "payment")
+    .filter((e) => e.type === "repayment")
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   if (payments.length > 0) {

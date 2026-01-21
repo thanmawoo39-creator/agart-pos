@@ -6,8 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Clock, LogIn, LogOut, Delete } from "lucide-react";
-import type { CurrentShift } from "@shared/schema";
+import type { Attendance, CurrentShift } from "@shared/schema";
 import { format } from "date-fns";
+
+type ClockInResponse = {
+  success: true;
+  attendance: Attendance;
+  staffName: string;
+};
+
+type ClockOutResponse = {
+  success: true;
+  attendance: Attendance | null;
+  totalHours: number | null | undefined;
+};
 
 export function ShiftButton() {
   const { toast } = useToast();
@@ -21,16 +33,18 @@ export function ShiftButton() {
 
   const clockInMutation = useMutation({
     mutationFn: (pin: string) => apiRequest("POST", "/api/attendance/clock-in", { pin }),
-    onSuccess: (data: any) => {
+    onSuccess: async (res) => {
+      const data = (await res.json()) as ClockInResponse;
       queryClient.invalidateQueries({ queryKey: ["/api/attendance/current"] });
       toast({ title: `${data.staffName} clocked in successfully` });
       setIsOpen(false);
       setPin("");
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({
         title: "Clock in failed",
-        description: error.message || "Invalid PIN or error",
+        description: err.message || "Invalid PIN or error",
         variant: "destructive",
       });
       setPin("");
@@ -39,7 +53,8 @@ export function ShiftButton() {
 
   const clockOutMutation = useMutation({
     mutationFn: (pin: string) => apiRequest("POST", "/api/attendance/clock-out", { pin }),
-    onSuccess: (data: any) => {
+    onSuccess: async (res) => {
+      const data = (await res.json()) as ClockOutResponse;
       queryClient.invalidateQueries({ queryKey: ["/api/attendance/current"] });
       toast({
         title: "Clocked out successfully",
@@ -48,10 +63,11 @@ export function ShiftButton() {
       setIsOpen(false);
       setPin("");
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({
         title: "Clock out failed",
-        description: error.message || "Invalid PIN or error",
+        description: err.message || "Invalid PIN or error",
         variant: "destructive",
       });
       setPin("");
@@ -94,11 +110,10 @@ export function ShiftButton() {
         variant={isWorking ? "default" : "outline"}
         size="lg"
         onClick={() => setIsOpen(true)}
-        className={`gap-2 min-w-[140px] ${
-          isWorking
+        className={`gap-2 min-w-[140px] ${isWorking
             ? "bg-emerald-600 hover:bg-emerald-700 text-white"
             : "bg-slate-100 dark:bg-slate-800 text-muted-foreground"
-        }`}
+          }`}
         data-testid="button-shift"
       >
         <Clock className="h-5 w-5" />
@@ -139,11 +154,10 @@ export function ShiftButton() {
               {[0, 1, 2, 3].map((i) => (
                 <div
                   key={i}
-                  className={`w-14 h-14 rounded-lg border-2 flex items-center justify-center text-2xl font-bold transition-colors ${
-                    pin[i]
+                  className={`w-14 h-14 rounded-lg border-2 flex items-center justify-center text-2xl font-bold transition-colors ${pin[i]
                       ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600"
                       : "border-muted bg-muted/30"
-                  }`}
+                    }`}
                   data-testid={`pin-digit-${i}`}
                 >
                   {pin[i] ? "*" : ""}
@@ -199,11 +213,10 @@ export function ShiftButton() {
 
             <Button
               size="lg"
-              className={`w-full gap-2 text-lg h-14 ${
-                isWorking
+              className={`w-full gap-2 text-lg h-14 ${isWorking
                   ? "bg-red-600 hover:bg-red-700"
                   : "bg-emerald-600 hover:bg-emerald-700"
-              }`}
+                }`}
               onClick={handleSubmit}
               disabled={pin.length !== 4 || isPending}
               data-testid="button-submit-shift"

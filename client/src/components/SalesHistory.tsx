@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Eye } from 'lucide-react';
 import { Sale } from '@/types/sales';
+import { useCurrency } from '@/hooks/use-currency';
 
 interface SalesHistoryProps {
   sales: Sale[];
@@ -11,6 +12,7 @@ interface SalesHistoryProps {
 }
 
 export function SalesHistory({ sales, salesLoading }: SalesHistoryProps) {
+  const { formatCurrency } = useCurrency();
   return (
     <Card>
       <CardHeader>
@@ -38,7 +40,7 @@ export function SalesHistory({ sales, salesLoading }: SalesHistoryProps) {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold">${sale.total.toFixed(2)}</p>
+                    <p className="font-bold">{formatCurrency(Number(sale.total) || 0)}</p>
                     {sale.paymentSlipUrl && (
                       <Button
                         size="sm"

@@ -152,7 +152,7 @@ const HeaderStoreSwitcher = () => {
               key={unit.id}
               value={unit.id}
               className={cn(
-                'flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border-2 transition-all duration-300 cursor-pointer',
+                'flex items-center gap-1.5 md:gap-2 px-2 py-1 md:px-3 md:py-2 text-xs md:text-sm font-medium rounded-lg border-2 transition-all duration-300 cursor-pointer h-8 md:h-9',
                 'hover:scale-[1.02] active:scale-[0.98]',
                 isActive
                   ? 'bg-primary text-primary-foreground border-primary ring-2 ring-primary/40 ring-offset-1 shadow-lg shadow-primary/30'
@@ -160,11 +160,11 @@ const HeaderStoreSwitcher = () => {
               )}
             >
               <Icon
-                className={cn('h-[18px] w-[18px] transition-all', isActive ? 'text-primary-foreground' : config.color)}
+                className={cn('h-3.5 w-3.5 md:h-[18px] md:w-[18px] transition-all', isActive ? 'text-primary-foreground' : config.color)}
                 strokeWidth={isActive ? 2.75 : 2}
               />
               <span className={cn(
-                'transition-all',
+                'transition-all truncate max-w-[80px] md:max-w-none',
                 isActive ? 'text-primary-foreground font-semibold' : cn(config.color, 'font-medium')
               )}>
                 {unit.name}

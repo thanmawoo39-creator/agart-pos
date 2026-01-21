@@ -32,8 +32,9 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
+import { useCurrency } from "@/hooks/use-currency";
 import { Plus, Trash2, Edit2, Lock, DollarSign, TrendingUp, Lightbulb, Calendar, Filter, Camera, X, Upload, Eye } from "lucide-react";
-import type { Expense, ExpenseCategory } from "@shared/schema";
+import type { Expense, ExpenseCategory, InsertExpense } from "@shared/schema";
 import { format } from "date-fns";
 
 const EXPENSE_CATEGORIES: ExpenseCategory[] = ["Rent", "Electricity", "Fuel", "Internet", "Taxes", "Other"];
@@ -56,9 +57,19 @@ interface ExpenseInsightData {
   expenseToSalesRatio: number;
 }
 
+type ReceiptAnalysis = {
+  category?: ExpenseCategory;
+  estimatedAmount?: number | null;
+  summary?: string | null;
+  warnings?: string[];
+  isValid?: boolean;
+  error?: string;
+};
+
 export default function Expenses() {
   const { toast } = useToast();
   const { session, isOwner } = useAuth();
+  const { formatCurrency } = useCurrency();
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -98,7 +109,7 @@ export default function Expenses() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: { category: ExpenseCategory; amount: number; date: string; description?: string; note?: string; receiptImageUrl?: string }) => {
+    mutationFn: async (data: Omit<InsertExpense, "timestamp"> & { receiptImageUrl?: string }) => {
       const res = await apiRequest("POST", "/api/expenses", {
         ...data,
       });
@@ -109,10 +120,11 @@ export default function Expenses() {
       queryClient.invalidateQueries({ queryKey: ["/api/ai/expense-insights"] });
       toast({ title: "Expense added successfully" });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({
         title: "Failed to add expense",
-        description: error.message,
+        description: err.message,
         variant: "destructive",
       });
     },
@@ -127,10 +139,11 @@ export default function Expenses() {
       toast({ title: "Expense updated successfully" });
       closeEditModal();
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({
         title: "Failed to update expense",
-        description: error.message,
+        description: err.message,
         variant: "destructive",
       });
     },
@@ -145,10 +158,11 @@ export default function Expenses() {
       setDeleteConfirmOpen(false);
       setSelectedExpense(null);
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const err = error as Error;
       toast({
         title: "Failed to delete expense",
-        description: error.message,
+        description: err.message,
         variant: "destructive",
       });
     },
@@ -177,24 +191,24 @@ export default function Expenses() {
         // Try to get error response, handle both JSON and HTML
         const contentType = res.headers.get('content-type');
         let errorData;
-        
+
         if (contentType && contentType.includes('application/json')) {
           errorData = await res.json().catch(() => ({ message: 'An unknown error occurred' }));
         } else {
           // If HTML error page, create a more helpful error
           const text = await res.text().catch(() => 'Server returned an error');
-          errorData = { 
+          errorData = {
             error: 'Server returned an HTML error page instead of JSON',
             details: text.substring(0, 200) // Truncate long HTML responses
           };
         }
-        
+
         throw new Error(errorData.error || errorData.message || 'Failed to analyze receipt');
       }
 
       const responseText = await res.text();
-      let analysisResult;
-      
+      let analysisResult: unknown;
+
       try {
         analysisResult = JSON.parse(responseText);
       } catch (parseError) {
@@ -202,6 +216,8 @@ export default function Expenses() {
         console.error('Response text:', responseText);
         throw new Error('Invalid response format from server');
       }
+
+      return analysisResult as ReceiptAnalysis;
     },
   });
 
@@ -224,7 +240,7 @@ export default function Expenses() {
     if (event.target.files && event.target.files.length > 0) {
       const file = event.target.files[0];
       setReceiptFileName(file.name);
-      
+
       // Convert file to Base64 for preview
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -261,15 +277,15 @@ export default function Expenses() {
     try {
       setIsUploadingReceipt(true);
       console.log('Starting receipt image upload...');
-      
+
       // Convert base64 to blob
       const response = await fetch(receiptImage);
       const blob = await response.blob();
-      
+
       // Create FormData
       const formData = new FormData();
       formData.append('image', blob, receiptFileName || 'receipt.jpg');
-      
+
       // Upload to server
       const uploadResponse = await fetch('/api/upload', {
         method: 'POST',
@@ -286,12 +302,12 @@ export default function Expenses() {
 
       const uploadData = await uploadResponse.json();
       console.log('Upload successful:', uploadData);
-      
+
       // Return the full URL
-      const fullUrl = uploadData.url.startsWith('http') 
-        ? uploadData.url 
+      const fullUrl = uploadData.url.startsWith('http')
+        ? uploadData.url
         : `${window.location.origin}${uploadData.url}`;
-      
+
       return fullUrl;
     } catch (error) {
       console.error('Error uploading receipt:', error);
@@ -365,7 +381,7 @@ export default function Expenses() {
     if (imageForAi) {
       void analyzeReceiptMutation
         .mutateAsync(imageForAi)
-        .then((analysis: any) => {
+        .then((analysis) => {
           const suggestedCategory = analysis?.category ?? null;
           const suggestedAmount = typeof analysis?.estimatedAmount === 'number' ? analysis.estimatedAmount : null;
           const summary = analysis?.summary ?? null;
@@ -379,7 +395,8 @@ export default function Expenses() {
             description: `Saved expense ${created.id}. Category: ${suggestedCategory ?? '-'}, Amount: ${suggestedAmount ?? '-'}${summary ? `, Summary: ${summary}` : ''}`,
           });
         })
-        .catch((err: any) => {
+        .catch((err: unknown) => {
+          const e = err as Error;
           console.error('AI Analysis failed:', err);
           toast({
             title: "AI Analysis Unavailable",
@@ -416,8 +433,8 @@ export default function Expenses() {
 
   const totalFiltered = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
 
-  const applyAiSuggestionsToForm = (analysis: any) => {
-    const suggestedCategory = analysis?.category as ExpenseCategory | undefined;
+  const applyAiSuggestionsToForm = (analysis: ReceiptAnalysis) => {
+    const suggestedCategory = analysis?.category;
     const suggestedAmount = typeof analysis?.estimatedAmount === 'number' ? analysis.estimatedAmount : undefined;
     const suggestedSummary = typeof analysis?.summary === 'string' ? analysis.summary : undefined;
 
@@ -442,7 +459,7 @@ export default function Expenses() {
 
   const handleTakePhotoClick = async () => {
     console.log('Camera: Starting camera initialization');
-    
+
     // Check if mediaDevices is supported
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       console.error('Camera: mediaDevices not supported', {
@@ -470,24 +487,24 @@ export default function Expenses() {
 
     try {
       // Try to get camera access with environment (rear) camera first
-      const constraints = { 
-        video: { 
+      const constraints = {
+        video: {
           facingMode: 'environment',
           width: { ideal: 1280 },
           height: { ideal: 720 }
-        } 
+        }
       };
-      
+
       console.log('Camera: Requesting with constraints:', constraints);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
+
       console.log('Camera: Stream obtained successfully', {
         active: stream.active,
         tracks: stream.getTracks().length
       });
-      
+
       setCameraStream(stream);
-      
+
       // Set video source after a small delay to ensure the stream is ready
       setTimeout(() => {
         if (videoRef.current) {
@@ -518,19 +535,21 @@ export default function Expenses() {
           setCameraError("Camera preview failed to load. Please upload an image instead.");
         }
       }, 2500);
-      
+
       setCameraError(null);
     } catch (err) {
       console.error("Camera: Error accessing camera:", err);
-      
+
       if (err instanceof Error) {
         console.log('Camera: Error details:', {
           name: err.name,
           message: err.message,
-          constraint: (err as any).constraint,
+          constraint: (typeof (err as unknown as { constraint?: unknown })?.constraint === 'string'
+            ? (err as unknown as { constraint?: string }).constraint
+            : undefined),
           toString: err.toString()
         });
-        
+
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
           setCameraError("Camera permission was denied. Please allow camera access in your browser settings or upload an image from your gallery.");
         } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
@@ -677,7 +696,7 @@ export default function Expenses() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold" data-testid="text-monthly-expenses">
-              ${Math.round(insights?.totalExpensesThisMonth || 0)}
+              {formatCurrency(Number(insights?.totalExpensesThisMonth) || 0)}
             </div>
             {insights && insights.totalExpensesLastMonth > 0 && (
               <p className="text-xs text-muted-foreground">
@@ -702,7 +721,7 @@ export default function Expenses() {
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${(insights?.estimatedNetProfit || 0) >= 0 ? "text-green-600" : "text-red-600"}`} data-testid="text-net-profit">
-              ${Math.round(insights?.estimatedNetProfit || 0)}
+              {formatCurrency(Number(insights?.estimatedNetProfit) || 0)}
             </div>
             <p className="text-xs text-muted-foreground">
               Expense ratio: {(insights?.expenseToSalesRatio || 0).toFixed(1)}% of sales
@@ -719,11 +738,10 @@ export default function Expenses() {
             {insights?.insights && insights.insights.length > 0 ? (
               <div className="space-y-1">
                 {insights.insights.slice(0, 2).map((insight, idx) => (
-                  <p key={idx} className={`text-xs ${
-                    insight.type === "warning" ? "text-amber-600 dark:text-amber-400" :
+                  <p key={idx} className={`text-xs ${insight.type === "warning" ? "text-amber-600 dark:text-amber-400" :
                     insight.type === "success" ? "text-green-600 dark:text-green-400" :
-                    "text-muted-foreground"
-                  }`} data-testid={`text-insight-${idx}`}>
+                      "text-muted-foreground"
+                    }`} data-testid={`text-insight-${idx}`}>
                     {insight.message}
                   </p>
                 ))}
@@ -810,17 +828,14 @@ export default function Expenses() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          ${Math.round(expense.amount)}
+                          {formatCurrency(Number(expense.amount) || 0)}
                         </TableCell>
                         <TableCell className="max-w-[200px] truncate">
                           {expense.note || "-"}
                         </TableCell>
                         <TableCell>
                           {(() => {
-                            const receiptUrl =
-                              (expense as any).receiptImageUrl ??
-                              (expense as any).receipt_url ??
-                              (expense as any).receipt;
+                            const receiptUrl = expense.receiptImageUrl;
 
                             return receiptUrl ? (
                               <Button
@@ -864,7 +879,7 @@ export default function Expenses() {
               </div>
               <div className="flex justify-between items-center mt-4 text-sm">
                 <span className="text-muted-foreground">{filteredExpenses.length} expense(s)</span>
-                <span className="font-semibold">Total: ${Math.round(totalFiltered)}</span>
+                <span className="font-semibold">Total: {formatCurrency(Number(totalFiltered) || 0)}</span>
               </div>
             </>
           )}
@@ -877,7 +892,7 @@ export default function Expenses() {
           <DialogHeader>
             <DialogTitle>Take Receipt Photo</DialogTitle>
             <DialogDescription>
-              {cameraError 
+              {cameraError
                 ? "Camera access failed. You can upload an image from your gallery instead."
                 : "Position the receipt within the frame and click capture."}
             </DialogDescription>
@@ -890,7 +905,7 @@ export default function Expenses() {
                   <p className="font-semibold">Camera Access Failed</p>
                   <p className="text-sm mt-1">{cameraError}</p>
                 </div>
-                
+
                 <div className="text-center text-sm text-muted-foreground">
                   <p>Alternative: Choose an image from your device gallery</p>
                 </div>
@@ -929,7 +944,7 @@ export default function Expenses() {
                     setCameraError("Failed to load camera preview. Please try uploading from gallery.");
                   }}
                 />
-                
+
                 <div className="text-center text-xs text-muted-foreground">
                   <p>Make sure the receipt is clearly visible and well-lit</p>
                 </div>
@@ -981,7 +996,7 @@ export default function Expenses() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="amount">Amount ($)</Label>
+              <Label htmlFor="amount">Amount</Label>
               <Input
                 id="amount"
                 type="number"
@@ -1013,7 +1028,7 @@ export default function Expenses() {
                 data-testid="input-note"
               />
             </div>
-            
+
             {/* Receipt Photo Section */}
             <div className="space-y-2">
               <Label>Receipt Photo (optional)</Label>
@@ -1048,7 +1063,7 @@ export default function Expenses() {
                   multiple={false}
                 />
               </div>
-              
+
               {/* Receipt Preview */}
               {receiptImage && (
                 <div className="mt-3 p-3 border rounded-lg bg-muted/50">
@@ -1086,14 +1101,14 @@ export default function Expenses() {
                         onClick={() => {
                           void analyzeReceiptMutation
                             .mutateAsync(receiptImage)
-                            .then((analysis: any) => {
+                            .then((analysis) => {
                               applyAiSuggestionsToForm(analysis);
                               toast({
                                 title: "AI Suggestions Applied",
                                 description: "Filled any empty fields. You can still edit everything manually.",
                               });
                             })
-                            .catch((err: any) => {
+                            .catch((err: unknown) => {
                               console.error('AI Analysis failed:', err);
                               toast({
                                 title: "AI Analysis Unavailable",
@@ -1118,9 +1133,9 @@ export default function Expenses() {
             <Button variant="outline" onClick={closeAddModal} data-testid="button-cancel-add">
               Cancel
             </Button>
-            <Button 
-              onClick={handleSubmitAdd} 
-              disabled={createMutation.isPending || isUploadingReceipt} 
+            <Button
+              onClick={handleSubmitAdd}
+              disabled={createMutation.isPending || isUploadingReceipt}
               data-testid="button-save-expense"
             >
               {isUploadingReceipt ? "Uploading..." : createMutation.isPending ? "Saving..." : "Save Expense"}
@@ -1150,7 +1165,7 @@ export default function Expenses() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-amount">Amount ($)</Label>
+              <Label htmlFor="edit-amount">Amount</Label>
               <Input
                 id="edit-amount"
                 type="number"
