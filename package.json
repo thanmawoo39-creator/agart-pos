@@ -7,7 +7,7 @@
     "dev": "set NODE_ENV=development && tsx server/index.ts",
     "build": "tsx script/build.ts",
     "build:client": "vite build",
-    "build:server": "esbuild server/index.ts --bundle --platform=node --outfile=dist/index.js --format=esm --external:better-sqlite3 --external:socket.io --external:vite",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --outfile=dist/index.js --format=esm --packages=external --external:@vite-pwa/* --external:@babel/*",
     "build:all": "npm run build:client && npm run build:server",
     "start": "cross-env NODE_ENV=production node dist/index.js",
     "check": "tsc",
