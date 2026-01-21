@@ -5,7 +5,7 @@ import * as schema from "@shared/schema";
 import path from "path";
 
 const dbPath = process.env.NODE_ENV === "production"
-    ? path.resolve("/data/sqlite.db")
+    ? path.resolve("/data/database.sqlite")
     : "database.sqlite";
 
 export const sqlite = new Database(dbPath);
