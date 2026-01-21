@@ -15,7 +15,7 @@ export default defineConfig({
   plugins: [
     react(),
     runtimeErrorOverlay(),
-    VitePWA({
+    /* VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.png', 'favicon.ico'],
       manifest: {
@@ -66,24 +66,24 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        // Increase cache size limit to 5MB for large bundle
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/api\.qrserver\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'qr-cache',
-              expiration: {
-                maxEntries: 20,
-                maxAgeSeconds: 60 * 60 * 24 * 7 // 7 days
-              }
-            }
+        globPatterns: ['**//*.{js,css,html,ico,png,svg,woff,woff2}'],
+    // Increase cache size limit to 5MB for large bundle
+    maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+    runtimeCaching: [
+      {
+        urlPattern: /^https:\/\/api\.qrserver\.com\/.//i,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'qr-cache',
+          expiration: {
+            maxEntries: 20,
+            maxAgeSeconds: 60 * 60 * 24 * 7 // 7 days
           }
-        ]
+        }
       }
-    }),
+    ]
+  }
+}), */
     // Replit plugins removed for Koyeb deployment compatibility (avoids top-level await)
     // ...(process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined ? ... : []),
   ],
