@@ -101,13 +101,17 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000, // Increase warning threshold to 1000kb
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Group React core together to avoid circular dependencies
-          'react-vendor': ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'scheduler'],
-          'query-vendor': ['@tanstack/react-query'],
-          'ui-vendor': ['framer-motion', 'lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-tabs', '@radix-ui/react-select'],
-          'map-vendor': ['leaflet', 'react-leaflet'],
-          'chart-vendor': ['recharts'],
+        manualChunks(id) {
+          // Don't split node_modules - let Rollup handle it naturally
+          // This avoids circular dependency issues
+          if (id.includes('node_modules')) {
+            // Only split out large chart library
+            if (id.includes('recharts') || id.includes('d3-')) {
+              return 'chart-vendor';
+            }
+            // Keep everything else together to avoid React initialization issues
+            return 'vendor';
+          }
         },
       },
     },
