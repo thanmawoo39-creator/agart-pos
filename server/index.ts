@@ -526,7 +526,7 @@ import { eq, sql } from 'drizzle-orm';
     try {
       console.log('Applying database migrations...');
       await ensureNonEmptySqlMigrations(path.join(process.cwd(), 'migrations'));
-      await migrate(db, { migrationsFolder: "./migrations" });
+      // await migrate(db, { migrationsFolder: "./migrations" });
       console.log('✅ Migrations applied successfully.');
     } catch (err) {
       console.error('❌ Migration error:', err);
