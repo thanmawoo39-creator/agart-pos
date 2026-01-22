@@ -101,25 +101,13 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000, // Increase warning threshold to 1000kb
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom')) {
-              return 'react-vendor';
-            }
-            if (id.includes('@tanstack/react-query')) {
-              return 'query-vendor';
-            }
-            if (id.includes('framer-motion') || id.includes('lucide-react')) {
-              return 'ui-vendor';
-            }
-            if (id.includes('leaflet')) {
-              return 'map-vendor';
-            }
-            if (id.includes('recharts')) {
-              return 'chart-vendor';
-            }
-            return 'vendor'; // All other node_modules
-          }
+        manualChunks: {
+          // Group React core together to avoid circular dependencies
+          'react-vendor': ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'scheduler'],
+          'query-vendor': ['@tanstack/react-query'],
+          'ui-vendor': ['framer-motion', 'lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-tabs', '@radix-ui/react-select'],
+          'map-vendor': ['leaflet', 'react-leaflet'],
+          'chart-vendor': ['recharts'],
         },
       },
     },
