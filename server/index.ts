@@ -628,8 +628,11 @@ import { eq, sql } from 'drizzle-orm';
     createStartupBackup();
 
     // Serve public folder statically for QR codes and other static assets
+    // NOTE: Only serve specific paths from public/ to avoid conflict with dist/public/assets
     app.use('/qrcodes', express.static(path.join(process.cwd(), 'public', 'qrcodes')));
-    app.use(express.static(path.join(process.cwd(), 'public')));
+    app.use('/icons', express.static(path.join(process.cwd(), 'public', 'icons')));
+    app.use('/sounds', express.static(path.join(process.cwd(), 'public', 'sounds')));
+    // Don't use generic express.static(public) as it conflicts with dist/public serving
 
     // Setup static file serving
     // PRODUCTION: Always serve pre-built files from dist/public
