@@ -13,16 +13,14 @@ router.get('/init-passwords', async (req, res) => {
   console.log("🔑 Password initialization endpoint called!");
   try {
     // Get all owners and managers
-    const ownersAndManagers = db.select().from(staff)
-      .where(or(eq(staff.role, "owner"), eq(staff.role, "manager")))
-      .all();
+    const ownersAndManagers = await db.select().from(staff)
+      .where(or(eq(staff.role, "owner"), eq(staff.role, "manager")));
 
     let updated = 0;
     for (const s of ownersAndManagers) {
-      db.update(staff)
+      await db.update(staff)
         .set({ password: "admin123", updatedAt: new Date().toISOString() })
-        .where(eq(staff.id, s.id))
-        .run();
+        .where(eq(staff.id, s.id));
       updated++;
       console.log(`✅ Set password 'admin123' for: ${s.name} (${s.role})`);
     }
@@ -42,7 +40,7 @@ router.get('/init-passwords', async (req, res) => {
 // EXCLUDES customers to keep the login screen clean
 router.get('/staff-list', async (req, res) => {
   try {
-    const allStaff = db.select({
+    const allStaff = await db.select({
       id: staff.id,
       name: staff.name,
       role: staff.role,
@@ -54,8 +52,7 @@ router.get('/staff-list', async (req, res) => {
           eq(staff.status, "active"),
           ne(staff.role, "customer")
         )
-      )
-      .all();
+      );
 
     res.json(allStaff);
   } catch (error: any) {
@@ -95,7 +92,8 @@ router.post("/login", async (req, res) => {
 
     // If staffId provided (password login flow), fetch by ID first
     if (staffId && password) {
-      staffMember = db.select().from(staff).where(eq(staff.id, staffId)).get();
+      const staffResult = await db.select().from(staff).where(eq(staff.id, staffId));
+      staffMember = staffResult[0];
 
       if (!staffMember) {
         return res.status(401).json({ error: "Staff member not found" });
@@ -183,10 +181,9 @@ router.post("/set-password", async (req, res) => {
     }
 
     // Update password (plain text for now)
-    db.update(staff)
+    await db.update(staff)
       .set({ password: newPassword, updatedAt: new Date().toISOString() })
-      .where(eq(staff.id, staffId))
-      .run();
+      .where(eq(staff.id, staffId));
 
     console.log(`✅ Password updated for staff ID: ${staffId}`);
     res.json({ success: true });
@@ -200,17 +197,15 @@ router.post("/set-password", async (req, res) => {
 router.get("/init-passwords", async (req, res) => {
   try {
     // Set default password 'admin123' for all owners/managers without password
-    const ownersAndManagers = db.select().from(staff)
-      .where(or(eq(staff.role, "owner"), eq(staff.role, "manager")))
-      .all();
+    const ownersAndManagers = await db.select().from(staff)
+      .where(or(eq(staff.role, "owner"), eq(staff.role, "manager")));
 
     let updated = 0;
     for (const s of ownersAndManagers) {
       if (!s.password) {
-        db.update(staff)
+        await db.update(staff)
           .set({ password: "admin123", updatedAt: new Date().toISOString() })
-          .where(eq(staff.id, s.id))
-          .run();
+          .where(eq(staff.id, s.id));
         updated++;
         console.log(`✅ Set default password for: ${s.name} (${s.role})`);
       }

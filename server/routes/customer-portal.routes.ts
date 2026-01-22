@@ -76,8 +76,7 @@ router.get('/orders', async (req: any, res) => {
             .from(sales)
             .where(eq(sales.guestId, userId))
             .orderBy(desc(sales.timestamp))
-            .limit(50) // Limit to last 50
-            .all();
+            .limit(50);
 
         res.json(userOrders);
     } catch (error) {

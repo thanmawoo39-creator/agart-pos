@@ -150,8 +150,7 @@ router.get('/orders', async (req, res) => {
         const customerOrders = await db.select()
             .from(sales)
             .where(eq(sales.guestId, userId))
-            .orderBy(desc(sales.timestamp))
-            .all();
+            .orderBy(desc(sales.timestamp));
 
         res.json(customerOrders);
     } catch (error) {
@@ -258,8 +257,7 @@ router.post('/convert', async (req, res) => {
             // Link all sales with this phone to the user
             await db.update(sales)
                 .set({ guestId: userId })
-                .where(eq(sales.customerPhone, phone))
-                .run();
+                .where(eq(sales.customerPhone, phone));
 
         } else {
             return res.status(400).json({ error: 'GuestId or phone is required' });

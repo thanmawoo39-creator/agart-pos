@@ -305,16 +305,16 @@ router.put('/orders/:id', async (req, res) => {
         console.log(`🔄 Updating catering order ${orderId}:`, { customerName, itemCount: items?.length });
 
         // Transaction: Update order + replace items
-        const result = db.transaction((tx) => {
+        const result = await db.transaction(async (tx) => {
             // 1. Delete old items
-            tx.delete(cateringItems).where(eq(cateringItems.cateringOrderId, orderId)).run();
+            await tx.delete(cateringItems).where(eq(cateringItems.cateringOrderId, orderId));
 
             // 2. Calculate new total
             const totalAmount = items.reduce((sum: number, item: any) =>
                 sum + ((item.quantity || 0) * (item.unitPrice || 0)), 0);
 
             // 3. Update order
-            const updatedOrderArray = tx.update(cateringOrders)
+            const updatedOrderArray = await tx.update(cateringOrders)
                 .set({
                     customerName,
                     customerPhone,
@@ -324,15 +324,14 @@ router.put('/orders/:id', async (req, res) => {
                     totalAmount
                 })
                 .where(eq(cateringOrders.id, orderId))
-                .returning()
-                .all();
+                .returning();
 
             const updatedOrder = updatedOrderArray[0];
 
             // 4. Insert new items (filter out zero quantities)
             const validItems = items.filter((item: any) => (item.quantity || 0) > 0);
             if (validItems.length > 0) {
-                tx.insert(cateringItems).values(
+                await tx.insert(cateringItems).values(
                     validItems.map((item: any) => ({
                         cateringOrderId: orderId,
                         itemName: item.itemName,
@@ -341,7 +340,7 @@ router.put('/orders/:id', async (req, res) => {
                         totalPrice: item.quantity * item.unitPrice,
                         isAddon: item.isAddon || false
                     }))
-                ).run();
+                );
             }
 
             return updatedOrder;

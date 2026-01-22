@@ -660,17 +660,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { or, eq } = await import('drizzle-orm');
 
       // Get all owners and managers
-      const ownersAndManagers = db.select().from(staff)
-        .where(or(eq(staff.role, "owner"), eq(staff.role, "manager")))
-        .all();
+      const ownersAndManagers = await db.select().from(staff)
+        .where(or(eq(staff.role, "owner"), eq(staff.role, "manager")));
 
       let updated = 0;
       for (const s of ownersAndManagers) {
         // Update password to 'admin123' for all owners/managers
-        db.update(staff)
+        await db.update(staff)
           .set({ password: "admin123", updatedAt: new Date().toISOString() })
-          .where(eq(staff.id, s.id))
-          .run();
+          .where(eq(staff.id, s.id));
         updated++;
         console.log(`✅ Set password 'admin123' for: ${s.name} (${s.role})`);
       }
@@ -691,7 +689,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const { eq, ne, and, notLike } = await import('drizzle-orm');
 
-      const allStaff = db.select({
+      const allStaff = await db.select({
         id: staff.id,
         name: staff.name,
         role: staff.role,
@@ -703,7 +701,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         notLike(staff.name, "%Guest%"),
         notLike(staff.name, "%Test%"),
         notLike(staff.name, "%Customer%")
-      )).all();
+      ));
 
       res.json(allStaff);
     } catch (error: any) {
@@ -1423,7 +1421,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Get all restaurant tables
   app.get("/api/restaurant-tables", isAuthenticated, requireAdmin, async (req, res) => {
     try {
-      const tables = await db.select().from(restaurantTables).all();
+      const tables = await db.select().from(restaurantTables);
       res.json(tables);
     } catch (error) {
       // Return empty array instead of 500 to prevent infinite error loops
@@ -1621,7 +1619,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Simple endpoint for Settings page - returns all restaurant tables without complex filtering
   app.get("/api/restaurant-tables", isAuthenticated, requireAdmin, async (req, res) => {
     try {
-      const tables = db.select().from(restaurantTables).all();
+      const tables = await db.select().from(restaurantTables);
       console.log(`📋 Fetched ${tables.length} restaurant tables for settings`);
       res.json(tables);
     } catch (error) {
@@ -1674,7 +1672,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       // Delete the table
-      db.delete(restaurantTables).where(eq(restaurantTables.id, tableId)).run();
+      await db.delete(restaurantTables).where(eq(restaurantTables.id, tableId));
 
       console.log(`🗑️ Deleted table ID: ${tableId}`);
       res.json({ success: true, deletedId: tableId });
