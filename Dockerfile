@@ -3,12 +3,17 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
-COPY package*.json ./
-RUN npm install
+# Copy only package.json first (ignore local package-lock.json to ensure clean install)
+COPY package.json ./
 
-# Copy source code
+# Clean install - generate fresh package-lock.json inside container
+RUN npm install --legacy-peer-deps
+
+# Copy source code (excluding node_modules via .dockerignore)
 COPY . .
+
+# Ensure no local node_modules contamination
+RUN rm -rf node_modules/.cache 2>/dev/null || true
 
 # Build frontend and backend
 # This runs "vite build" (client) and "esbuild" (server)

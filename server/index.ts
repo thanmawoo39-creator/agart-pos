@@ -1,8 +1,11 @@
+// Load dotenv FIRST before any other imports
+import dotenv from 'dotenv';
+dotenv.config();
+
 import 'dotenv/config';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
 import { exec } from 'child_process';
 import os from 'os';
 import { ensureNonEmptySqlMigrations, runMigrations } from './lib/run-migrations';
@@ -510,6 +513,14 @@ import { eq, sql } from 'drizzle-orm';
 (async () => {
   try {
     await killPortPromise;
+
+    // Startup delay for Render Free Tier - allows database to be fully ready
+    const startupDelay = parseInt(process.env.STARTUP_DELAY_MS || '30000', 10);
+    if (process.env.NODE_ENV === 'production' && startupDelay > 0) {
+      console.log(`⏳ Waiting ${startupDelay / 1000}s for database to be ready (Render Free Tier)...`);
+      await new Promise(resolve => setTimeout(resolve, startupDelay));
+      console.log('✅ Startup delay complete, proceeding with migrations...');
+    }
 
     // Run full Drizzle migrations on startup
     try {

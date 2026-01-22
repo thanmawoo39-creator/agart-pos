@@ -14,6 +14,9 @@ if (!connectionString) {
 export const pool = new Pool({
     connectionString: connectionString,
     ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+    connectionTimeoutMillis: 60000, // 60 second connection timeout for Render Free Tier
+    idleTimeoutMillis: 30000,
+    max: 10, // Maximum number of clients in the pool
 });
 
 // Initialize Drizzle ORM with PostgreSQL
